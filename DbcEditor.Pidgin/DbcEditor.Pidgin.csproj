@@ -51,6 +51,8 @@
           Generator="MSBuild:Compile" />
     <Page Include="..\DbcEditor\Controls\**\*.xaml" Link="Controls\%(RecursiveDir)%(Filename)%(Extension)"
           Generator="MSBuild:Compile" />
+    <Content Include="..\DbcEditor\Templates\**\*.dbc" Link="Templates\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Stale obj FileList can reference *.g.cs before MarkupCompile; always regenerate markup first. -->

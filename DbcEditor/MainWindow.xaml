@@ -21,6 +21,7 @@
   <DockPanel>
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
+        <MenuItem Header="_Create Database..." Command="{Binding CreateDatabaseCommand}"/>
         <MenuItem Header="_Open..." Command="{Binding OpenCommand}" InputGestureText="Ctrl+O"/>
         <MenuItem Header="_Save" Command="{Binding SaveCommand}" InputGestureText="Ctrl+S"/>
         <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGestureText="Ctrl+Shift+S"/>
@@ -178,7 +179,7 @@
             </DataGrid.Columns>
           </DataGrid>
 
-          <!-- Value Table (VtSig_* / VtEv_*) ¡ª Vector: Name | Comment | Usage -->
+          <!-- Value Table (VtSig_* / VtEv_*) â€” Vector: Name | Comment | Usage -->
           <DataGrid ItemsSource="{Binding ValueTableRows}"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"

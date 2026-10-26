@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -21,6 +21,12 @@
     <None Include="tools\**\*" />
     <Compile Remove="Grammar\_gen\**\*" />
     <None Include="Grammar\_gen\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Templates\**\*.dbc">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
