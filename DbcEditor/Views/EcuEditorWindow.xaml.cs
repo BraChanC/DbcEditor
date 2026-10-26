@@ -53,6 +53,19 @@ public partial class EcuEditorWindow : Window
 
     private void OnRemoveEnvVar(object sender, RoutedEventArgs e) => Vm.RemoveSelectedEnvVar();
 
+    private void OnViewEnvVar(object sender, RoutedEventArgs e) => OpenSelectedEnvVar();
+
+    private void OnEnvVarDoubleClick(object sender, MouseButtonEventArgs e) => OpenSelectedEnvVar();
+
+    private void OpenSelectedEnvVar()
+    {
+        var ev = Vm.SelectedEnvVariable?.Model;
+        if (ev == null) return;
+        var dlg = new EnvVarEditorWindow(_db, ev) { Owner = this };
+        if (dlg.ShowDialog() == true)
+            Vm.RefreshEnvVars();
+    }
+
     private void OnAttributeCommitted(object sender, AttrCommittedEventArgs e) =>
         Vm.CommitAttribute(e.Name, e.Value);
 
@@ -155,6 +168,8 @@ public sealed class EcuEditorVm : INotifyPropertyChanged
         ReloadEnvVars();
         BuildAttributes(db, node);
     }
+
+    public void RefreshEnvVars() => ReloadEnvVars();
 
     private void ReloadEnvVars()
     {
