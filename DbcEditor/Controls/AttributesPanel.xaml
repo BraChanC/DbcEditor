@@ -1,0 +1,68 @@
+<UserControl x:Class="DbcEditor.Controls.AttributesPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:models="clr-namespace:DbcEditor.Models">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolVis"/>
+  </UserControl.Resources>
+  <DockPanel Margin="8">
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" LastChildFill="True">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button Content="Read from DB..." Width="110" Height="23" Margin="0,0,8,0" IsEnabled="False"/>
+        <Button Content="Write to DB..." Width="110" Height="23" Margin="0,0,8,0" IsEnabled="False"/>
+        <Button Content="Reset" Width="72" Height="23" IsEnabled="False"/>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+        <TextBlock Text="Definition:  " Foreground="#555" FontFamily="Tahoma" FontSize="11"/>
+        <TextBlock x:Name="DefinitionText" Foreground="#222"
+                   FontFamily="Tahoma" FontSize="11" TextTrimming="CharacterEllipsis"/>
+      </StackPanel>
+    </DockPanel>
+
+    <TreeView x:Name="AttrTree"
+              SelectedItemChanged="OnSelectedChanged"
+              PreviewMouseDoubleClick="OnTreeDoubleClick"
+              MouseLeftButtonDown="OnTreeMouseDown">
+      <TreeView.Resources>
+        <!-- Group -->
+        <HierarchicalDataTemplate DataType="{x:Type models:EditableAttrGroup}"
+                                  ItemsSource="{Binding Children}">
+          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontFamily="Tahoma" FontSize="11"/>
+        </HierarchicalDataTemplate>
+        <!-- Leaf: name | value (text / combo / textbox) -->
+        <DataTemplate DataType="{x:Type models:EditableAttrItem}">
+          <Grid MinWidth="420" Margin="0,1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="220"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding Name}" FontFamily="Tahoma" FontSize="11" VerticalAlignment="Center"/>
+            <Grid Grid.Column="1" Margin="8,0,0,0" MinHeight="22">
+              <TextBlock Text="{Binding DisplayValue}" FontFamily="Tahoma" FontSize="11"
+                         VerticalAlignment="Center"
+                         Visibility="{Binding ShowText, Converter={StaticResource BoolVis}}"/>
+              <ComboBox ItemsSource="{Binding EnumOptions}"
+                        SelectedItem="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        FontFamily="Tahoma" FontSize="11" Height="22"
+                        Visibility="{Binding ShowCombo, Converter={StaticResource BoolVis}}"
+                        DropDownClosed="OnComboClosed"
+                        LostFocus="OnEditorLostFocus"
+                        Loaded="OnEditorLoaded"/>
+              <TextBox Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                       FontFamily="Tahoma" FontSize="11" Height="22" Padding="2,1"
+                       Visibility="{Binding ShowTextBox, Converter={StaticResource BoolVis}}"
+                       LostFocus="OnEditorLostFocus"
+                       KeyDown="OnTextBoxKeyDown"
+                       Loaded="OnEditorLoaded"/>
+            </Grid>
+          </Grid>
+        </DataTemplate>
+      </TreeView.Resources>
+      <TreeView.ItemContainerStyle>
+        <Style TargetType="TreeViewItem">
+          <Setter Property="IsExpanded" Value="True"/>
+        </Style>
+      </TreeView.ItemContainerStyle>
+    </TreeView>
+  </DockPanel>
+</UserControl>

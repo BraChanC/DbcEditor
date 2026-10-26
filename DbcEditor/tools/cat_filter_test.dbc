@@ -1,0 +1,30 @@
+VERSION ""
+
+NS_ :
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+
+BS_:
+
+BU_: ECU
+
+BA_DEF_ BO_ "CAT_" STRING ;
+BA_DEF_ SG_ "FILTER" INT 0 10 ;
+BA_DEF_DEF_ "CAT_" "" ;
+BA_DEF_DEF_ "FILTER" 0 ;
+
+BO_ 1234 Powertrain : 8 ECU
+ SG_ EngSpeed : 0|16@1+ (1,0) [0|8000] "rpm" ECU
+ SG_ FILTER_VehicleSpeed : 16|16@1+ (1,0) [0|300] "km/h" ECU
+
+BO_ 100 CAT_ABS_Info : 8 ECU
+ SG_ WheelSpeed : 0|16@1+ (1,0) [0|300] "" ECU
+
+BA_ "CAT_" BO_ 1234 "Chassis" ;
+BA_ "FILTER" SG_ 1234 EngSpeed 3 ;

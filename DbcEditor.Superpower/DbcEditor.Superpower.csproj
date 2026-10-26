@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>DbcEditor</RootNamespace>
+    <AssemblyName>DbcEditor.Superpower</AssemblyName>
+    <ApplicationTitle>DBC Editor (Superpower)</ApplicationTitle>
+    <DefineConstants>$(DefineConstants);DBC_PARSER_SUPERPOWER</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Superpower" Version="3.2.1" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="_smoke\**" />
+    <None Remove="_smoke\**" />
+    <Page Remove="_smoke\**" />
+    <EmbeddedResource Remove="_smoke\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DbcEditor\App.xaml.cs" Link="App.xaml.cs" />
+    <Compile Include="..\DbcEditor\MainWindow.xaml.cs" Link="MainWindow.xaml.cs" />
+    <Compile Include="..\DbcEditor\AssemblyInfo.cs" Link="AssemblyInfo.cs" Condition="Exists('..\DbcEditor\AssemblyInfo.cs')" />
+    <Compile Include="..\DbcEditor\Controls\**\*.cs" Link="Controls\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DbcEditor\Helpers\**\*.cs" Link="Helpers\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DbcEditor\Models\**\*.cs" Link="Models\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DbcEditor\ViewModels\**\*.cs" Link="ViewModels\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DbcEditor\Views\**\*.cs" Link="Views\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\DbcEditor\Services\**\*.cs" Link="Services\%(RecursiveDir)%(Filename)%(Extension)"
+             Exclude="..\DbcEditor\Services\DbcAntlrLoader.cs" />
+    <Compile Include="..\DbcParserCommon\**\*.cs" Link="ParserCommon\%(RecursiveDir)%(Filename)%(Extension)"
+             Exclude="..\DbcParserCommon\obj\**;..\DbcParserCommon\bin\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Include="..\DbcEditor\App.xaml" Link="App.xaml" />
+    <Page Include="..\DbcEditor\MainWindow.xaml" Link="MainWindow.xaml" />
+    <Page Include="..\DbcEditor\Views\**\*.xaml" Link="Views\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Page Include="..\DbcEditor\Controls\**\*.xaml" Link="Controls\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

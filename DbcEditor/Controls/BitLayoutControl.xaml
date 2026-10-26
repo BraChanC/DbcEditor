@@ -1,0 +1,85 @@
+<UserControl x:Class="DbcEditor.Controls.BitLayoutControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="White"
+             Focusable="True"
+             SnapsToDevicePixels="True">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="118"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="40"/>
+    </Grid.RowDefinitions>
+
+    <!-- Vector left chrome: Arrange / To Front / To Back / Add / Remove + Bit index -->
+    <Border Grid.Row="0" Grid.Column="0" Background="#F8F8FA" BorderBrush="#D2D2D2"
+            BorderThickness="0,0,1,0" Margin="0,28,0,0" Padding="8,8,8,8">
+      <StackPanel>
+        <Button x:Name="BtnArrange" Content="Arrange" Height="24" Margin="0,0,0,4"
+                FontFamily="Tahoma" FontSize="11" Click="OnArrangeClick"/>
+        <Button x:Name="BtnToFront" Content="To Front" Height="24" Margin="0,0,0,4"
+                FontFamily="Tahoma" FontSize="11" Click="OnToFrontClick"/>
+        <Button x:Name="BtnToBack" Content="To Back" Height="24" Margin="0,0,0,4"
+                FontFamily="Tahoma" FontSize="11" Click="OnToBackClick"/>
+        <Button x:Name="BtnAdd" Content="Add..." Height="24" Margin="0,0,0,4"
+                FontFamily="Tahoma" FontSize="11" Click="OnAddClick"/>
+        <Button x:Name="BtnRemove" Content="Remove" Height="24" Margin="0,0,0,12"
+                FontFamily="Tahoma" FontSize="11" Click="OnRemoveClick"/>
+
+        <TextBlock Text="Bit index" FontFamily="Tahoma" FontSize="11" Margin="0,0,0,4" Foreground="#333"/>
+        <CheckBox x:Name="ChkInvert" Content="Inverted" FontFamily="Tahoma" FontSize="11"
+                  Checked="OnChromeChanged" Unchecked="OnChromeChanged" Margin="0,0,0,12"/>
+        <TextBlock Text="View" FontFamily="Tahoma" FontSize="11" Margin="0,0,0,4" Foreground="#333"/>
+        <RadioButton x:Name="RadioTiled" Content="Tiled" GroupName="ViewMode" IsChecked="True"
+                     FontFamily="Tahoma" FontSize="11" Checked="OnChromeChanged" Margin="0,0,0,2"/>
+        <RadioButton x:Name="RadioPaged" Content="Paged" GroupName="ViewMode"
+                     FontFamily="Tahoma" FontSize="11" Checked="OnChromeChanged" Margin="0,0,0,10"/>
+        <StackPanel x:Name="PageNav" Orientation="Horizontal" Visibility="Collapsed">
+          <Button x:Name="BtnPrev" Content="&lt;" Width="28" Height="22" Click="OnPrevPage" Margin="0,0,4,0"/>
+          <TextBlock x:Name="LblPage" Text="1/1" Width="44" TextAlignment="Center"
+                     VerticalAlignment="Center" FontFamily="Tahoma" FontSize="11"/>
+          <Button x:Name="BtnNext" Content="&gt;" Width="28" Height="22" Click="OnNextPage" Margin="4,0,0,0"/>
+        </StackPanel>
+        <Button Content="Edit Signal" Margin="0,16,0,0" Height="24" Click="OnEditSignalClick"
+                FontFamily="Tahoma" FontSize="11"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Drawing surface -->
+    <Border Grid.Row="0" Grid.Column="1" ClipToBounds="True">
+      <Grid>
+        <ScrollViewer x:Name="Scroller"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="False"
+                      PreviewMouseWheel="OnPreviewMouseWheel">
+          <Canvas x:Name="DrawHost" Background="White"
+                  MouseLeftButtonDown="OnCanvasClick"
+                  MouseLeftButtonUp="OnCanvasMouseUp"
+                  MouseMove="OnCanvasMouseMove"
+                  MouseLeave="OnCanvasMouseLeave"/>
+        </ScrollViewer>
+        <!-- Truncated signal name: full name beside cursor -->
+        <Popup x:Name="NameTip" Placement="Mouse" AllowsTransparency="True"
+               IsHitTestVisible="False" StaysOpen="True">
+          <Border Background="#FFFFFCE8" BorderBrush="#888888" BorderThickness="1"
+                  Padding="6,3" CornerRadius="2">
+            <TextBlock x:Name="NameTipText" FontFamily="Tahoma" FontSize="11"
+                       Foreground="#222"/>
+          </Border>
+        </Popup>
+      </Grid>
+    </Border>
+
+    <!-- Bottom status -->
+    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#F5F5F8" BorderBrush="#C8C8C8"
+            BorderThickness="0,1,0,0" Padding="8,0">
+      <TextBlock x:Name="StatusTip" VerticalAlignment="Center" FontFamily="Tahoma" FontSize="11"
+                 TextTrimming="CharacterEllipsis" Foreground="#666"
+                 Text="Bit index Inverted / Tiled|Paged. Click a signal for red selection."/>
+    </Border>
+  </Grid>
+</UserControl>

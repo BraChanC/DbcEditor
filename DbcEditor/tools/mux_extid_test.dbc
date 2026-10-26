@@ -1,0 +1,31 @@
+VERSION "mux_extid"
+
+NS_ :
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	BA_DEF_DEF_
+	SIG_VALTYPE_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: Hub ECU
+
+BO_ 2147483904 ExtFrame : 8 Hub
+ SG_ MuxRoot M : 0|2@1+ (1,0) [0|3] "" ECU
+ SG_ Mid m1M : 2|2@1+ (1,0) [0|3] "" ECU
+ SG_ Leaf m2 : 4|4@1+ (1,0) [0|15] "" ECU
+
+SG_MUL_VAL_ 2147483904 Mid MuxRoot 1-1 ;
+SG_MUL_VAL_ 2147483904 Leaf Mid 2-2 ;
+
+BA_DEF_ BO_ "VFrameFormat" ENUM "StandardCAN","ExtendedCAN","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","StandardCAN_FD","ExtendedCAN_FD" ;
+BA_DEF_DEF_ "VFrameFormat" "ExtendedCAN" ;
+BA_ "VFrameFormat" BO_ 2147483904 1 ;
+
+BO_ 256 StdFrame : 8 Hub
+ SG_ Plain : 0|8@1+ (1,0) [0|255] "" ECU
+ SG_ Both m3M : 8|4@1+ (1,0) [0|15] "" ECU
+ SG_ OnlyMuxed m5 : 12|4@1+ (1,0) [0|15] "" ECU
