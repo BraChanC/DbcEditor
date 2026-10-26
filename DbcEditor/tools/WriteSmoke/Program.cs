@@ -1,0 +1,10 @@
+using System.IO;
+using DbcEditor.Services;
+var path = @"E:\Vector\Soft\DbcEditor\tools\mux_extid_test.dbc";
+var outp = Path.Combine(Path.GetTempPath(), "dbc_roundtrip.dbc");
+var db = new DbcAntlrLoader().Load(path);
+DbcTextEncoding.WriteAllText(outp, DbcWriter.Write(db), path);
+var db2 = new DbcAntlrLoader().Load(outp);
+Console.WriteLine($"orig msgs={db.Messages.Count} sigs={db.AllSignals.Count}");
+Console.WriteLine($"load msgs={db2.Messages.Count} sigs={db2.AllSignals.Count}");
+Console.WriteLine(db.Messages.Count == db2.Messages.Count && db.AllSignals.Count == db2.AllSignals.Count ? "ROUNDTRIP OK" : "ROUNDTRIP MISMATCH");

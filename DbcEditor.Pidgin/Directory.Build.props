@@ -1,0 +1,7 @@
+<Project>
+  <!-- Linked XAML from ..\DbcEditor: don't auto-pick local App/Pages; force markup compile metadata. -->
+  <PropertyGroup>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+  </PropertyGroup>
+</Project>

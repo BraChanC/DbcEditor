@@ -41,6 +41,12 @@ public partial class MainViewModel : ObservableObject
         if (dlg.ShowDialog() != true) return;
         LoadPath(dlg.FileName);
     }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Create Database failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText = "Create failed";
+        }
+    }
 
     [RelayCommand]
     private void Reload()
@@ -51,6 +57,52 @@ public partial class MainViewModel : ObservableObject
             return;
         }
         LoadPath(FilePath);
+    }
+
+    private bool CanSave() => _db != null;
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private void Save() => DoSave(promptIfNoPath: string.IsNullOrEmpty(FilePath));
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private void SaveAs() => DoSave(promptIfNoPath: true);
+
+    private bool DoSave(bool promptIfNoPath)
+    {
+        if (_db == null) return false;
+        var path = FilePath;
+        if (promptIfNoPath || string.IsNullOrEmpty(path))
+        {
+            var dlg = new SaveFileDialog
+            {
+                Filter = "CANdb++ Database (*.dbc)|*.dbc|All files (*.*)|*.*",
+                FileName = string.IsNullOrEmpty(path)
+                    ? $"{_db.NetworkName}.dbc"
+                    : Path.GetFileName(path),
+                Title = "Save DBC As"
+            };
+            if (dlg.ShowDialog() != true) return false;
+            path = dlg.FileName;
+        }
+
+        try
+        {
+            var text = DbcWriter.Write(_db);
+            DbcTextEncoding.WriteAllText(path, text, encodingHintPath: FilePath);
+            FilePath = path;
+            _db.FilePath = path;
+            Title = $"Vector CANdb++ Editor (ANTLR4) - {path}";
+            StatusText = $"Saved {path}";
+            SaveCommand.NotifyCanExecuteChanged();
+            SaveAsCommand.NotifyCanExecuteChanged();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Save failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText = "Save failed";
+            return false;
+        }
     }
 
     [RelayCommand]
@@ -102,6 +154,8 @@ public partial class MainViewModel : ObservableObject
             RebuildTree();
             ShowMessages(_db.Messages);
             StatusText = $"{_db.Messages.Count} Message(s)  |  {_db.Nodes.Count} Node(s)  |  Ready";
+            SaveCommand.NotifyCanExecuteChanged();
+            SaveAsCommand.NotifyCanExecuteChanged();
         }
         catch (Exception ex)
         {
@@ -122,11 +176,11 @@ public partial class MainViewModel : ObservableObject
                 OpenEcu(item.Payload as string ?? item.Title);
                 break;
             case "EcuNode":
-                // Vector: ECUs / Name / Name â†’ ECU - Node 'Name'
+                // Vector: ECUs / Name / Name ¡ú ECU - Node 'Name'
                 OpenEcuNode(item.Payload as string ?? item.Title);
                 break;
             case "EcuUnderNet":
-                // Vector: under Networks/<net>/ â€” "Network Node 'xxx'"
+                // Vector: under Networks/<net>/ ¡ª "Network Node 'xxx'"
                 OpenNetworkNode(item.Payload as string ?? item.Title);
                 break;
             case "Node":
@@ -143,14 +197,14 @@ public partial class MainViewModel : ObservableObject
                     OpenMessage(msg);
                 break;
             case "Signal":
-                // Vector Signals tree â†’ catalog Attributes (GenSig*)
+                // Vector Signals tree ¡ú catalog Attributes (GenSig*)
                 if (item.Payload is DbcSignal catalogSig)
                     OpenSignal(catalogSig, catalogAttributes: true);
                 break;
             case "MessageSignal":
             case "NodeTxSignal":
             case "NodeRxSignal":
-                // Vector Messages / mapped signal â†’ Attributes empty
+                // Vector Messages / mapped signal ¡ú Attributes empty
                 if (item.Payload is DbcSignal ctxSig)
                     OpenSignal(ctxSig, catalogAttributes: false);
                 break;
@@ -263,7 +317,7 @@ public partial class MainViewModel : ObservableObject
 
     private void OpenNetworkNode(string nodeName)
     {
-        // Vector Networks / <net> / node â†’ Network Node 'name'
+        // Vector Networks / <net> / node ¡ú Network Node 'name'
         if (_db == null || string.IsNullOrWhiteSpace(nodeName)) return;
         var dlg = new NetworkNodeEditorWindow(_db, nodeName) { Owner = Application.Current.MainWindow };
         if (dlg.ShowDialog() == true)
@@ -327,7 +381,7 @@ public partial class MainViewModel : ObservableObject
         var sortedNodes = _db.Nodes.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
         // Networks / <name> / Tx Messages + Signals + node names
-        // Vector: Tx Messages / Signals under network are leaves (no expand); click â†’ right list
+        // Vector: Tx Messages / Signals under network are leaves (no expand); click ¡ú right list
         var networks = new TreeItemViewModel { Title = "Networks", Kind = "Root" };
         var net = new TreeItemViewModel { Title = _db.NetworkName, Kind = "Network", Payload = _db };
         net.Children.Add(new TreeItemViewModel { Title = "Tx Messages", Kind = "TxMessages", Payload = _db });
@@ -360,12 +414,12 @@ public partial class MainViewModel : ObservableObject
         foreach (var n in sortedNodes)
             nodes.Children.Add(BuildNodeBranch(n.Name));
 
-        // Top-level Messages â€” each message listed (0xIDx for extended)
+        // Top-level Messages ¡ª each message listed (0xIDx for extended)
         var messages = new TreeItemViewModel { Title = "Messages", Kind = "Messages", Payload = _db };
         foreach (var m in _db.Messages.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
             messages.Children.Add(BuildMessageTreeItem(m, "Message"));
 
-        // Top-level Signals â€” VAL_ signals expand to VtSig_* (no separate Value Tables root)
+        // Top-level Signals ¡ª VAL_ signals expand to VtSig_* (no separate Value Tables root)
         var signals = new TreeItemViewModel { Title = "Signals", Kind = "AllSignals", Payload = _db };
         foreach (var s in _db.AllSignals.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
             signals.Children.Add(BuildSignalTreeItem(s));
@@ -521,7 +575,7 @@ public partial class MainViewModel : ObservableObject
                 ShowSignals(_db.AllSignals, catalogAttributes: true);
                 break;
             case "NetSignalsRoot":
-                // Network Signals list â€” treat like catalog
+                // Network Signals list ¡ª treat like catalog
                 ShowSignals(_db.AllSignals, catalogAttributes: true);
                 break;
             case "NetSignalsNode":
@@ -548,7 +602,7 @@ public partial class MainViewModel : ObservableObject
                     ShowSignals(new[] { sMsg }, catalogAttributes: false);
                 break;
             case "VtSig":
-                // Single-click â†’ right list; double-click tree/grid â†’ dialog
+                // Single-click ¡ú right list; double-click tree/grid ¡ú dialog
                 if (item.Payload is DbcSignal vs)
                     ShowValueTables(new ValueTableRowViewModel(vs));
                 break;
@@ -556,7 +610,7 @@ public partial class MainViewModel : ObservableObject
                 ShowEnvVars(_db.EnvVars);
                 break;
             case "EnvVar":
-                // Single-click â†’ right list; double-click tree/grid â†’ dialog
+                // Single-click ¡ú right list; double-click tree/grid ¡ú dialog
                 if (item.Payload is DbcEnvVar ev)
                     ShowEnvVars(new[] { ev });
                 break;
@@ -572,7 +626,7 @@ public partial class MainViewModel : ObservableObject
             case "EcuUnderNet":
             case "NodeTxFolder":
             {
-                // Click node / Tx Messages â†’ Tx message list on the right
+                // Click node / Tx Messages ¡ú Tx message list on the right
                 var name = item.Payload as string ?? item.Title;
                 ShowMessages(_db.Messages
                     .Where(x => string.Equals(x.Transmitter, name, StringComparison.OrdinalIgnoreCase))

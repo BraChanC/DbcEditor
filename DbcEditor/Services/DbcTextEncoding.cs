@@ -19,6 +19,27 @@ public static class DbcTextEncoding
         return encoding.GetString(bytes);
     }
 
+    /// <summary>
+    /// Write DBC text. Prefer the encoding of an existing file (round-trip GBK/UTF-8);
+    /// otherwise GB18030 (common for Chinese Vector exports).
+    /// </summary>
+    public static void WriteAllText(string path, string text, string? encodingHintPath = null)
+    {
+        EnsureCodePages();
+        Encoding enc;
+        var hint = !string.IsNullOrEmpty(encodingHintPath) && File.Exists(encodingHintPath)
+            ? encodingHintPath
+            : File.Exists(path) ? path : null;
+        if (hint != null)
+            enc = Detect(File.ReadAllBytes(hint));
+        else
+        {
+            try { enc = Encoding.GetEncoding(54936); }
+            catch { enc = Encoding.GetEncoding(936); }
+        }
+        File.WriteAllText(path, text, enc);
+    }
+
     public static Encoding Detect(byte[] bytes)
     {
         EnsureCodePages();
