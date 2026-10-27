@@ -147,7 +147,10 @@ public partial class MainViewModel : ObservableObject
         }
         if (SelectedDetail is SignalRowViewModel srow)
         {
-            OpenSignal(srow.Model, srow.CatalogAttributes);
+            if (srow.CatalogAttributes)
+                OpenSignal(srow.Model, catalogAttributes: true);
+            else
+                OpenMessageSignal(srow.Model);
             return;
         }
         if (SelectedDetail is EnvVarRowViewModel erow)
@@ -225,6 +228,10 @@ public partial class MainViewModel : ObservableObject
                 if (item.Payload is DbcMessage msg)
                     OpenMessage(msg);
                 break;
+            case "SignalGroup":
+                if (item.Payload is DbcSignalGroup grp)
+                    OpenSignalGroup(grp);
+                break;
             case "Signal":
                 // Vector Signals tree → catalog Attributes (GenSig*)
                 if (item.Payload is DbcSignal catalogSig)
@@ -233,9 +240,9 @@ public partial class MainViewModel : ObservableObject
             case "MessageSignal":
             case "NodeTxSignal":
             case "NodeRxSignal":
-                // Vector Messages / mapped signal → Attributes empty
+                // Vector: message-mapped signal → Message Signal dialog
                 if (item.Payload is DbcSignal ctxSig)
-                    OpenSignal(ctxSig, catalogAttributes: false);
+                    OpenMessageSignal(ctxSig);
                 break;
             case "VtSig":
                 if (item.Payload is DbcSignal vts)
@@ -388,15 +395,50 @@ public partial class MainViewModel : ObservableObject
     private void OpenSignal(DbcSignal model, bool catalogAttributes = false)
     {
         if (_db == null) return;
-        var owner = _db.Messages.FirstOrDefault(m => m.Name == model.MessageName)
-                    ?? _db.Messages.FirstOrDefault(m => m.Id == model.MessageId && model.MessageId != 0)
-                    ?? _db.Messages.FirstOrDefault(m => m.Signals.Contains(model));
+        var owner = ResolveOwnerMessage(model);
         var dlg = new SignalEditorWindow(_db, model, owner, catalogAttributes)
         {
             Owner = Application.Current.MainWindow
         };
         dlg.ShowDialog();
         RefreshDetailAfterEdit();
+    }
+
+    private void OpenSignalGroup(DbcSignalGroup group)
+    {
+        if (_db == null) return;
+        var owner = _db.Messages.FirstOrDefault(m => SameMessageId(group.MessageId, m));
+        var dlg = new SignalGroupEditorWindow(group, owner) { Owner = Application.Current.MainWindow };
+        if (dlg.ShowDialog() == true && SelectedTreeItem?.Payload == group)
+            SelectedTreeItem.Title = group.Name;
+        RefreshDetailAfterEdit();
+    }
+
+    /// <summary>Vector Overall View / Messages: Message Signal 'Msg::Sig' editor.</summary>
+    private void OpenMessageSignal(DbcSignal model)
+    {
+        if (_db == null) return;
+        var owner = ResolveOwnerMessage(model);
+        if (owner == null)
+        {
+            OpenSignal(model, catalogAttributes: false);
+            return;
+        }
+
+        var dlg = new MessageSignalEditorWindow(_db, owner, model)
+        {
+            Owner = Application.Current.MainWindow
+        };
+        dlg.ShowDialog();
+        RefreshDetailAfterEdit();
+    }
+
+    private DbcMessage? ResolveOwnerMessage(DbcSignal model)
+    {
+        if (_db == null) return null;
+        return _db.Messages.FirstOrDefault(m => m.Name == model.MessageName)
+               ?? _db.Messages.FirstOrDefault(m => m.Id == model.MessageId && model.MessageId != 0)
+               ?? _db.Messages.FirstOrDefault(m => m.Signals.Contains(model));
     }
 
     private void RefreshDetailAfterEdit() => ApplyTreeSelection(SelectedTreeItem);
@@ -463,19 +505,65 @@ public partial class MainViewModel : ObservableObject
         TreeRoots.Add(signals);
     }
 
-    private static TreeItemViewModel BuildMessageTreeItem(DbcMessage m, string kind)
+    private TreeItemViewModel BuildMessageTreeItem(DbcMessage m, string kind)
     {
         var item = new TreeItemViewModel { Title = m.TreeTitle, Kind = kind, Payload = m };
+        var groups = _db == null
+            ? new List<DbcSignalGroup>()
+            : _db.SignalGroups.Where(g => SameMessageId(g.MessageId, m)).ToList();
+        var grouped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in groups)
+            foreach (var name in g.SignalNames)
+                grouped.Add(name);
+
         foreach (var s in m.Signals)
-            item.Children.Add(BuildSignalTreeItem(s, "MessageSignal"));
+        {
+            if (!grouped.Contains(s.Name))
+                item.Children.Add(BuildSignalTreeItem(s, "MessageSignal"));
+        }
+        foreach (var g in groups)
+        {
+            var groupNode = new TreeItemViewModel
+            {
+                Title = g.Name,
+                Kind = "SignalGroup",
+                Payload = g
+            };
+            foreach (var name in g.SignalNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            {
+                var sig = m.Signals.FirstOrDefault(s =>
+                    string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (sig != null)
+                    groupNode.Children.Add(BuildSignalTreeItem(sig, "MessageSignal"));
+            }
+            item.Children.Add(groupNode);
+        }
         return item;
+    }
+
+    private static bool SameMessageId(uint groupId, DbcMessage m) =>
+        groupId == m.Id || (groupId & DbcMessage.CanIdMask) == m.CanId;
+
+    private List<DbcSignal> SignalsInGroup(DbcSignalGroup grp)
+    {
+        var list = new List<DbcSignal>();
+        if (_db == null) return list;
+        var msg = _db.Messages.FirstOrDefault(m => SameMessageId(grp.MessageId, m));
+        if (msg == null) return list;
+        foreach (var name in grp.SignalNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+        {
+            var sig = msg.Signals.FirstOrDefault(s =>
+                string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (sig != null) list.Add(sig);
+        }
+        return list;
     }
 
     private static TreeItemViewModel BuildSignalTreeItem(DbcSignal s, string kind = "Signal")
     {
         var item = new TreeItemViewModel { Title = s.Name, Kind = kind, Payload = s };
-        // Vector: signal with VAL_ expands to a Value Table link node
-        if (s.ValueDescriptions.Count > 0)
+        // Messages stop at the signal. The Signals catalog still expands to VtSig_*.
+        if (kind == "Signal" && s.ValueDescriptions.Count > 0)
         {
             item.Children.Add(new TreeItemViewModel
             {
@@ -620,6 +708,10 @@ public partial class MainViewModel : ObservableObject
                 if (item.Payload is DbcMessage m)
                     ShowSignals(m.Signals, catalogAttributes: false);
                 break;
+            case "SignalGroup":
+                if (item.Payload is DbcSignalGroup grp)
+                    ShowSignals(SignalsInGroup(grp), catalogAttributes: false);
+                break;
             case "Signal":
                 if (item.Payload is DbcSignal sCat)
                     ShowSignals(new[] { sCat }, catalogAttributes: true);
@@ -726,8 +818,13 @@ public partial class MainViewModel : ObservableObject
         DetailMode = "Signals";
         SelectedDetail = null;
         ClearDetailGrids();
+        /* Vector Overall View: ! on signals whose bits overlap within the same message. */
+        var overlapping = new HashSet<DbcSignal>();
+        foreach (var g in signals.GroupBy(s => s.MessageId))
+            foreach (var s in DbcBitLayout.FindOverlappingSignals(g))
+                overlapping.Add(s);
         foreach (var s in signals)
-            SignalRows.Add(new SignalRowViewModel(s, displayName, catalogAttributes));
+            SignalRows.Add(new SignalRowViewModel(s, displayName, catalogAttributes, overlapping.Contains(s)));
         StatusText = string.IsNullOrEmpty(nodeContext)
             ? $"{signals.Count} Signal(s)  |  Ready"
             : $"Node: {nodeContext}  |  {signals.Count} Signal(s)  |  Ready";

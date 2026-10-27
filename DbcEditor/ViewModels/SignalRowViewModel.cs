@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DbcEditor.Models;
+using DbcEditor.Services;
 
 namespace DbcEditor.ViewModels;
 
@@ -14,18 +15,24 @@ public partial class SignalRowViewModel : ObservableObject
     /// </summary>
     public bool CatalogAttributes { get; }
 
-    public SignalRowViewModel(DbcSignal model, string? displayName = null, bool catalogAttributes = false)
+    [ObservableProperty] private bool _hasOverlapWarning;
+    [ObservableProperty] private string _overlapTooltip = "";
+
+    public SignalRowViewModel(DbcSignal model, string? displayName = null, bool catalogAttributes = false,
+        bool hasOverlapWarning = false)
     {
         Model = model;
         _displayName = displayName;
         CatalogAttributes = catalogAttributes;
+        HasOverlapWarning = hasOverlapWarning;
+        OverlapTooltip = hasOverlapWarning ? DbcBitLayout.OverlapTooltip(model) : "";
     }
 
     public string Name => _displayName ?? Model.Name;
     public string Message => Model.MessageName;
     public string Multiplexing =>
         string.IsNullOrWhiteSpace(Model.Multiplexing) ? "-" : Model.Multiplexing;
-    public int Startbit => Model.StartBit;
+    public int Startbit => DbcBitLayout.VectorStartBit(Model);
     public int Length => Model.Length;
     public string ByteOrder => Model.IsLittleEndian ? "Intel" : "Motorola";
     public string ValueType => Model.IsSigned ? "Signed" : "Unsigned";

@@ -106,7 +106,10 @@ public partial class NodeEditorWindow : Window
     {
         var msg = _db.Messages.FirstOrDefault(x => x.Name == s.MessageName)
                   ?? _db.Messages.FirstOrDefault(x => x.Id == s.MessageId);
-        new SignalEditorWindow(_db, s, msg, catalogAttributes: false) { Owner = this }.ShowDialog();
+        if (msg != null)
+            new MessageSignalEditorWindow(_db, msg, s) { Owner = this }.ShowDialog();
+        else
+            new SignalEditorWindow(_db, s, null, catalogAttributes: false) { Owner = this }.ShowDialog();
     }
 }
 

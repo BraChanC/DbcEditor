@@ -1,0 +1,212 @@
+<Window x:Class="DbcEditor.Views.MessageSignalEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctrl="clr-namespace:DbcEditor.Controls"
+        Title="Message Signal" Height="520" Width="700"
+        MinHeight="420" MinWidth="560"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        FontFamily="Tahoma" FontSize="11"
+        Background="#FFF0F0F0">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+  </Window.Resources>
+  <DockPanel Margin="10">
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+      <Button Content="确定" Width="80" Height="23" Margin="0,0,8,0" IsDefault="True" Click="OnOk"/>
+      <Button Content="取消" Width="80" Height="23" Margin="0,0,8,0" IsCancel="True"/>
+      <Button Content="应用(A)" Width="80" Height="23" Margin="0,0,8,0" Click="OnApply"/>
+      <Button Content="帮助" Width="80" Height="23" IsEnabled="False"/>
+    </StackPanel>
+
+    <!-- Vector: Definition | Message | Signal | Receivers | Value Descriptions | Attributes | Comment -->
+    <TabControl x:Name="Tabs" SelectionChanged="OnTabsSelectionChanged">
+      <TabItem Header="Definition">
+        <Grid Margin="16,12,16,8" VerticalAlignment="Top">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="130"/>
+            <ColumnDefinition Width="280"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+
+          <TextBlock Text="Message Name:" VerticalAlignment="Center"/>
+          <TextBox Grid.Column="1" Margin="0,5" Height="22" IsReadOnly="True"
+                   Text="{Binding MessageName, Mode=OneWay}"/>
+
+          <TextBlock Grid.Row="1" Text="Signal Name:" VerticalAlignment="Center"/>
+          <TextBox Grid.Row="1" Grid.Column="1" Margin="0,5" Height="22"
+                   Text="{Binding SignalName, UpdateSourceTrigger=PropertyChanged}"/>
+
+          <TextBlock Grid.Row="2" Text="Startbit [Bit]:" VerticalAlignment="Center"/>
+          <TextBox Grid.Row="2" Grid.Column="1" Margin="0,5" Height="22" Width="88"
+                   HorizontalAlignment="Left" Text="{Binding StartBit}"/>
+
+          <TextBlock Grid.Row="3" Text="Multiplexortype:" VerticalAlignment="Center"/>
+          <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,5" Height="22"
+                    ItemsSource="{Binding MultiplexorTypes}"
+                    SelectedItem="{Binding MultiplexorType}"/>
+
+          <TextBlock Grid.Row="4" Text="Multiplex Value:" VerticalAlignment="Center"
+                     Visibility="{Binding ShowMultiplexValue, Converter={StaticResource BoolToVis}}"/>
+          <TextBox Grid.Row="4" Grid.Column="1" Margin="0,5" Height="22"
+                   Text="{Binding MultiplexValue}"
+                   Visibility="{Binding ShowMultiplexValue, Converter={StaticResource BoolToVis}}"/>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Message">
+        <Grid Margin="16,12,16,8" VerticalAlignment="Top">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="100"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="50"/>
+            <ColumnDefinition Width="80"/>
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <TextBlock Text="Name:" VerticalAlignment="Center"/>
+          <TextBox Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4" Height="22"
+                   Text="{Binding MessageName, UpdateSourceTrigger=PropertyChanged}"/>
+          <TextBlock Grid.Row="1" Text="Type:" VerticalAlignment="Center"/>
+          <ComboBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4" Height="22"
+                    ItemsSource="{Binding IdFormats}" SelectedItem="{Binding IdFormat}"/>
+          <TextBlock Grid.Row="2" Text="ID:" VerticalAlignment="Center"/>
+          <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" Height="22" Text="{Binding IdText}"/>
+          <TextBlock Grid.Row="2" Grid.Column="2" Text="DLC:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+          <ComboBox Grid.Row="2" Grid.Column="3" Margin="0,4" Height="22"
+                    ItemsSource="{Binding DlcOptions}" SelectedItem="{Binding Dlc}"/>
+          <TextBlock Grid.Row="3" Text="Transmitter:" VerticalAlignment="Center"/>
+          <ComboBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4" Height="22"
+                    ItemsSource="{Binding TransmitterOptions}" SelectedItem="{Binding Transmitter}"
+                    IsEditable="True"/>
+          <TextBlock Grid.Row="4" Text="Tx Method:" VerticalAlignment="Center"/>
+          <ComboBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4" Height="22"
+                    ItemsSource="{Binding TxMethods}" SelectedItem="{Binding TxMethod}"
+                    IsEditable="True"/>
+          <TextBlock Grid.Row="5" Text="Cycle Time:" VerticalAlignment="Center"/>
+          <TextBox Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,4" Height="22"
+                   Text="{Binding CycleTime}"/>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Signal">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <Grid Margin="16,12,16,8" VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="100"/>
+              <ColumnDefinition Width="150"/>
+              <ColumnDefinition Width="90"/>
+              <ColumnDefinition Width="130"/>
+              <ColumnDefinition Width="46"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="Name:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" Grid.ColumnSpan="5" Margin="0,4" Height="22"
+                     Text="{Binding SignalName, UpdateSourceTrigger=PropertyChanged}"/>
+
+            <TextBlock Grid.Row="1" Text="Length [Bit]:" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Height="22" Width="88"
+                     HorizontalAlignment="Left" Text="{Binding Length}"/>
+            <TextBlock Grid.Row="1" Grid.Column="2" Text="Byte Order:" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="1" Grid.Column="3" Margin="0,4" Height="22"
+                      ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}"/>
+            <TextBlock Grid.Row="1" Grid.Column="4" Text="Unit:" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <TextBox Grid.Row="1" Grid.Column="5" Margin="0,4" Height="22" Text="{Binding Unit}"/>
+
+            <TextBlock Grid.Row="2" Text="Value Type:" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="2" Grid.Column="1" Margin="0,4" Height="22"
+                      ItemsSource="{Binding ValueTypes}" SelectedItem="{Binding ValueType}"/>
+            <TextBlock Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="2" Text="Init. Value"
+                       Foreground="#FF0000CC" TextDecorations="Underline" Cursor="Hand"
+                       VerticalAlignment="Center" MouseLeftButtonUp="OnInitValueClick"/>
+            <TextBox x:Name="InitValueBox" Grid.Row="2" Grid.Column="4" Grid.ColumnSpan="2"
+                     Margin="0,4" Height="22" Width="88" HorizontalAlignment="Left"
+                     Text="{Binding InitValue}"/>
+
+            <TextBlock Grid.Row="3" Text="Factor:" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Height="22" Text="{Binding Factor}"/>
+            <TextBlock Grid.Row="3" Grid.Column="2" Text="Offset:" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="3" Grid.Column="3" Margin="0,4" Height="22" Text="{Binding Offset}"/>
+
+            <TextBlock Grid.Row="4" Text="Minimum:" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Height="22" Text="{Binding Min}"/>
+            <TextBlock Grid.Row="4" Grid.Column="2" Text="Maximum:" VerticalAlignment="Center"/>
+            <TextBox Grid.Row="4" Grid.Column="3" Margin="0,4" Height="22" Text="{Binding Max}"/>
+
+            <Button Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="6" Margin="0,8,0,4" Height="26"
+                    Content="Calculate minimum and maximum" Click="OnCalculateMinMax"/>
+
+            <TextBlock Grid.Row="6" Text="Value Table:" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="5" Margin="0,4" Height="22"
+                      ItemsSource="{Binding ValueTableOptions}"
+                      SelectedItem="{Binding SelectedValueTable}"/>
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="Receivers">
+        <DockPanel Margin="8">
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="Add..." Width="72" Height="23" Margin="0,0,8,0" Click="OnAddReceiver"/>
+            <Button Content="Remove" Width="72" Height="23"
+                    Click="OnRemoveReceiver" IsEnabled="{Binding HasSelectedReceiver}"/>
+          </StackPanel>
+          <DataGrid ItemsSource="{Binding ReceiverNodes}" AutoGenerateColumns="False" IsReadOnly="True"
+                    HeadersVisibility="Column" CanUserAddRows="False"
+                    SelectedItem="{Binding SelectedReceiver, Mode=TwoWay}">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+              <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="100"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+
+      <TabItem Header="Value Descriptions">
+        <DataGrid ItemsSource="{Binding ValueDescriptions}" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" CanUserAddRows="False" Margin="8">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Value" Binding="{Binding ValueHex}" Width="120"/>
+            <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </TabItem>
+
+      <TabItem Header="Attributes">
+        <ctrl:AttributesPanel Groups="{Binding AttributeGroups}"
+                              Database="{Binding Database}"
+                              ObjectType="SG_"
+                              AttributeCommitted="OnAttributeCommitted"/>
+      </TabItem>
+
+      <TabItem Header="Comment">
+        <TextBox Margin="8" AcceptsReturn="True" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas" FontSize="12"
+                 Text="{Binding Comment}"/>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>

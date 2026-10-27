@@ -137,7 +137,7 @@
         <DataGrid ItemsSource="{Binding ValueDescriptions}" AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" CanUserAddRows="False" Margin="8">
           <DataGrid.Columns>
-            <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="120"/>
+            <DataGridTextColumn Header="Value" Binding="{Binding ValueHex}" Width="120"/>
             <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
           </DataGrid.Columns>
         </DataGrid>

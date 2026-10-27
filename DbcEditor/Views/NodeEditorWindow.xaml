@@ -52,7 +52,7 @@
               <DataGridTextColumn Header="Signal" Binding="{Binding Name}" Width="*"/>
               <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="140"/>
               <DataGridTextColumn Header="Multiplexing/Group" Binding="{Binding MultiplexingDisplay}" Width="120"/>
-              <DataGridTextColumn Header="Startbit" Binding="{Binding StartBit}" Width="70"/>
+              <DataGridTextColumn Header="Startbit" Binding="{Binding VectorStartBit}" Width="70"/>
               <DataGridTextColumn Header="Length [Bit]" Binding="{Binding Length}" Width="90"/>
               <DataGridTemplateColumn Header="Byte Order" Width="90">
                 <DataGridTemplateColumn.CellTemplate>
@@ -115,7 +115,7 @@
               <DataGridTextColumn Header="Signal" Binding="{Binding Name}" Width="*"/>
               <DataGridTextColumn Header="Message" Binding="{Binding MessageName}" Width="140"/>
               <DataGridTextColumn Header="Multiplexing/Group" Binding="{Binding MultiplexingDisplay}" Width="120"/>
-              <DataGridTextColumn Header="Startbit" Binding="{Binding StartBit}" Width="70"/>
+              <DataGridTextColumn Header="Startbit" Binding="{Binding VectorStartBit}" Width="70"/>
               <DataGridTextColumn Header="Length [Bit]" Binding="{Binding Length}" Width="90"/>
               <DataGridTemplateColumn Header="Byte Order" Width="90">
                 <DataGridTemplateColumn.CellTemplate>

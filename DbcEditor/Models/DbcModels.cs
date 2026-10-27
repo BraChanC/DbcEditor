@@ -126,6 +126,8 @@ public sealed class DbcSignal
 {
     public string Name { get; set; } = "";
     public int StartBit { get; set; }
+    /// <summary>CANdb++ Startbit. Motorola shows the LSB; <see cref="StartBit"/> stays the DBC MSB.</summary>
+    public int VectorStartBit => Services.DbcBitLayout.VectorStartBit(this);
     public int Length { get; set; }
     public bool IsLittleEndian { get; set; } = true;
     public bool IsSigned { get; set; }
@@ -164,6 +166,8 @@ public sealed class DbcValueDesc
 {
     public long Value { get; set; }
     public string Description { get; set; } = "";
+    /// <summary>CANdb++ Value Descriptions column. File still stores the decimal raw value.</summary>
+    public string ValueHex => Value < 0 ? $"-0x{-Value:X}" : $"0x{Value:X}";
 }
 
 public sealed class DbcValueTable
@@ -196,6 +200,7 @@ public sealed class DbcSignalGroup
     public uint MessageId { get; set; }
     public string Name { get; set; } = "";
     public int Repetitions { get; set; }
+    public string Comment { get; set; } = "";
     public List<string> SignalNames { get; } = new();
 }
 

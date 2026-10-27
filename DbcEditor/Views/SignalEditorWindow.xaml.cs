@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using DbcEditor.Models;
+using DbcEditor.Services;
 
 namespace DbcEditor.Views;
 
@@ -163,7 +164,7 @@ public sealed class SignalEditorVm : INotifyPropertyChanged
         _catalogAttributes = catalogAttributes;
         Name = s.Name;
         Length = s.Length.ToString();
-        StartBit = s.StartBit.ToString();
+        StartBit = DbcBitLayout.VectorStartBit(s).ToString();
         ByteOrder = s.IsLittleEndian ? "Intel" : "Motorola";
         ValueType = s.IsSigned ? "Signed" : "Unsigned";
         Factor = s.Factor.ToString(CultureInfo.InvariantCulture);
@@ -417,8 +418,9 @@ public sealed class SignalEditorVm : INotifyPropertyChanged
     {
         s.Name = Name;
         if (int.TryParse(Length, out var len)) s.Length = len;
-        if (int.TryParse(StartBit, out var sb)) s.StartBit = sb;
         s.IsLittleEndian = ByteOrder == "Intel";
+        if (int.TryParse(StartBit, out var shown))
+            s.StartBit = DbcBitLayout.DbcStartFromVector(s.IsLittleEndian, shown, s.Length);
         s.IsSigned = ValueType == "Signed";
         if (double.TryParse(Factor, NumberStyles.Float, CultureInfo.InvariantCulture, out var f)) s.Factor = f;
         if (double.TryParse(Offset, NumberStyles.Float, CultureInfo.InvariantCulture, out var o)) s.Offset = o;

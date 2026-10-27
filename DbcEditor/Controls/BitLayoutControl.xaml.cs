@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using DbcEditor.Models;
+using DbcEditor.Services;
 
 namespace DbcEditor.Controls;
 
@@ -38,6 +39,13 @@ public partial class BitLayoutControl : UserControl
     public event Action? EditSignalRequested;
     public event Action? AddSignalRequested;
     public event Action? RemoveSignalRequested;
+    /// <summary>Raised after Layout To Front / To Back / drag changes StartBit positions.</summary>
+    public event Action? LayoutSignalsChanged;
+
+    /// <summary>
+    /// Absolute bit last clicked on the grid (empty cell or signal). Used by Layout Add...
+    /// </summary>
+    public int PendingInsertAbsBit { get; private set; } = -1;
 
     /// <summary>Paint / overlap order (later = on top / owns shared bits). Survives redraws.</summary>
     private readonly List<DbcSignal> _zOrder = new();
@@ -64,7 +72,7 @@ public partial class BitLayoutControl : UserControl
     private int _dlc;
     private int _page;
     private int _selSig = -1;
-    private bool _inverted;
+    private bool _inverted; /* Vector default: Inverted unchecked */
     private bool _paged;
     private int[] _owner = Array.Empty<int>();
     private List<int>[] _sigBits = Array.Empty<List<int>>();
@@ -77,6 +85,13 @@ public partial class BitLayoutControl : UserControl
     private int _lastClickSig = -2;
     private bool _redrawing;
     private readonly List<TextBlock> _nameLabels = new();
+
+    private Point _mouseDownPt;
+    private int _mouseDownSig = -1;
+    private int _mouseDownAbsBit = -1;
+    private bool _dragging;
+    private int _dragOrigStartBit = -1;
+    private HashSet<DbcSignal> _overlap = new();
 
     public BitLayoutControl()
     {
@@ -98,6 +113,7 @@ public partial class BitLayoutControl : UserControl
         var c = (BitLayoutControl)d;
         c._page = 0;
         c._selSig = -1;
+        c.PendingInsertAbsBit = -1;
         c.SyncZOrder();
         c.RebuildMap();
         c.UpdateLayoutButtons();
@@ -140,46 +156,190 @@ public partial class BitLayoutControl : UserControl
     private void UpdateLayoutButtons()
     {
         bool hasSel = SelectedSignal != null;
-        if (BtnToFront != null) BtnToFront.IsEnabled = hasSel;
-        if (BtnToBack != null) BtnToBack.IsEnabled = hasSel;
+        var ordered = hasSel ? LayoutOrder() : null;
+        int idx = ordered != null ? ordered.IndexOf(SelectedSignal!) : -1;
+        bool front = ordered != null && idx > 0;
+        bool back = ordered != null && idx >= 0 && idx < ordered.Count - 1;
+        if (BtnToFront != null) BtnToFront.IsEnabled = front;
+        if (BtnToBack != null) BtnToBack.IsEnabled = back;
         if (BtnRemove != null) BtnRemove.IsEnabled = hasSel;
         if (BtnArrange != null) BtnArrange.IsEnabled = Message?.Signals.Count > 0;
     }
 
-    private void OnArrangeClick(object sender, RoutedEventArgs e)
+    /// <summary>Signals ordered by first occupied bit (layout front → back).</summary>
+    private List<DbcSignal> LayoutOrder()
     {
-        SyncZOrder();
-        var ordered = _zOrder
-            .OrderBy(s => s.StartBit)
-            .ThenBy(s => s.Length)
+        var msg = Message;
+        if (msg == null) return new List<DbcSignal>();
+        return msg.Signals
+            .OrderBy(DbcBitLayout.MinOccupiedBit)
+            .ThenBy(s => s.StartBit)
             .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        _zOrder.Clear();
-        _zOrder.AddRange(ordered);
-        RebuildMap();
-        Redraw();
     }
 
-    private void OnToFrontClick(object sender, RoutedEventArgs e)
+    /// <summary>Vector Layout Add: place signal at the last clicked byte row.</summary>
+    public void ApplyInsertPosition(DbcSignal sg)
+    {
+        if (PendingInsertAbsBit < 0) return;
+        if (sg.Length <= 0) sg.Length = 8;
+        sg.StartBit = DbcBitLayout.StartBitForByteInsert(sg, PendingInsertAbsBit);
+    }
+
+    private void OnArrangeClick(object sender, RoutedEventArgs e)
+    {
+        var msg = Message;
+        if (msg == null || msg.Signals.Count == 0) return;
+
+        /* Vector: refuse auto-arrange when Σ lengths > 64 (classic CAN). */
+        int occupiedBits = 0;
+        foreach (var s in msg.Signals)
+            occupiedBits += Math.Max(0, s.Length);
+        if (occupiedBits > 64)
+        {
+            MessageBox.Show(
+                $"The signals in the message '{msg.Name}' occupy more than 64 bits and therefore cannot be arranged automatically.",
+                "CANdb++",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        DbcBitLayout.ArrangeSignals(msg.Signals);
+        SyncZOrder();
+        _zOrder.Clear();
+        _zOrder.AddRange(msg.Signals);
+        RebuildMap();
+        Redraw();
+        UpdateLayoutButtons();
+        UpdateStatus();
+        LayoutSignalsChanged?.Invoke();
+        if (SelectedSignal != null)
+        {
+            SelectedSignal = SelectedSignal;
+            _selSig = msg.Signals.IndexOf(SelectedSignal);
+        }
+    }
+
+    private void OnToFrontClick(object sender, RoutedEventArgs e) => ToFrontOrBack(-1);
+
+    private void OnToBackClick(object sender, RoutedEventArgs e) => ToFrontOrBack(+1);
+
+    /// <summary>
+    /// Vector CANdb++ 3.1, Radar_Header numTxObjs, recorded in order:
+    /// To Front across a hole → start 42, covered MisAlign follows at 50.
+    /// To Back onto the signal after the LSB → that follower moves in front, numTxObjs follows (MisAlign 42–40, numTxObjs 55–48).
+    /// To Back across a hole → Timestamp slides back by 8 (96–72), numTxObjs takes the tail 111–104.
+    /// To Front while the previous bit is occupied → whole swap back (79–72, Timestamp 104–80).
+    /// </summary>
+    private void ToFrontOrBack(int delta)
     {
         var sg = SelectedSignal;
-        if (sg == null) return;
+        var msg = Message;
+        if (sg == null || msg == null) return;
+
+        var ordered = LayoutOrder();
+        int bitIdx = ordered.IndexOf(sg);
+        if (bitIdx < 0) return;
+
+        if (delta < 0)
+            MoveTowardFront(sg, msg, ordered, bitIdx);
+        else
+            MoveTowardBack(sg, msg, ordered);
+
         SyncZOrder();
+        _zOrder.Clear();
+        _zOrder.AddRange(msg.Signals);
         _zOrder.Remove(sg);
         _zOrder.Add(sg);
+
+        SelectedSignal = sg;
+        _selSig = msg.Signals.IndexOf(sg);
         RebuildMap();
+        Redraw();
+        UpdateLayoutButtons();
+        UpdateStatus();
+        LayoutSignalsChanged?.Invoke();
+        SelectedSignal = sg;
+        _selSig = msg.Signals.IndexOf(sg);
+        UpdateLayoutButtons();
+        UpdateStatus();
         Redraw();
     }
 
-    private void OnToBackClick(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Previous bit occupied: repack this signal in front of that neighbor.
+    /// Previous bit empty: step onto previous.StartBit - 1; signals under the new footprint follow.
+    /// </summary>
+    private static void MoveTowardFront(DbcSignal sg, DbcMessage msg, List<DbcSignal> ordered, int bitIdx)
     {
-        var sg = SelectedSignal;
-        if (sg == null) return;
-        SyncZOrder();
-        _zOrder.Remove(sg);
-        _zOrder.Insert(0, sg);
-        RebuildMap();
-        Redraw();
+        int before = DbcBitLayout.StepOutside(sg, -1);
+        var touch = DbcBitLayout.SignalAtBit(msg.Signals, before, sg);
+        if (touch != null)
+        {
+            DbcBitLayout.RepackAdjacentPair(sg, touch);
+            SwapList(msg, sg, touch);
+            return;
+        }
+
+        if (bitIdx <= 0) return;
+        var neighbor = ordered[bitIdx - 1];
+        int newStart = Math.Max(0, neighbor.StartBit - 1);
+        var probe = new DbcSignal
+        {
+            StartBit = newStart,
+            Length = sg.Length,
+            IsLittleEndian = sg.IsLittleEndian
+        };
+        var displaced = msg.Signals
+            .Where(o => !ReferenceEquals(o, sg) && o.Length > 0 && DbcBitLayout.Overlaps(probe, o))
+            .OrderBy(DbcBitLayout.MinOccupiedBit)
+            .ToList();
+
+        sg.StartBit = newStart;
+        var ahead = sg;
+        foreach (var other in displaced)
+        {
+            other.StartBit = DbcBitLayout.StartBitRightAfter(ahead, other);
+            ahead = other;
+        }
+    }
+
+    /// <summary>
+    /// Next bit occupied: whole interchange, the follower goes in front
+    /// (MisAlign 50 → 42/41/40, numTxObjs → 55–48). Do not cover the signal ahead.
+    /// Next bit empty: slide the next signal back by this length and take its old tail
+    /// (Timestamp 87→79, numTxObjs → 111).
+    /// </summary>
+    private static void MoveTowardBack(DbcSignal sg, DbcMessage msg, List<DbcSignal> ordered)
+    {
+        int after = DbcBitLayout.StepOutside(sg, +1);
+        var follower = DbcBitLayout.SignalAtBit(msg.Signals, after, sg);
+        if (follower != null)
+        {
+            DbcBitLayout.RepackAdjacentPair(follower, sg);
+            SwapList(msg, sg, follower);
+            return;
+        }
+
+        int sgMax = DbcBitLayout.MaxOccupiedBit(sg);
+        var next = ordered.FirstOrDefault(s =>
+            !ReferenceEquals(s, sg) && s.Length > 0 && DbcBitLayout.MinOccupiedBit(s) > sgMax);
+        if (next == null) return;
+
+        int oldNext = next.StartBit;
+        int oldLen = next.Length;
+        next.StartBit = Math.Max(0, oldNext - sg.Length);
+        sg.StartBit = Math.Max(0, oldNext + oldLen - sg.Length);
+        SwapList(msg, sg, next);
+    }
+
+    private static void SwapList(DbcMessage msg, DbcSignal a, DbcSignal b)
+    {
+        int i1 = msg.Signals.IndexOf(a);
+        int i2 = msg.Signals.IndexOf(b);
+        if (i1 < 0 || i2 < 0 || i1 == i2) return;
+        (msg.Signals[i1], msg.Signals[i2]) = (b, a);
     }
 
     private void OnAddClick(object sender, RoutedEventArgs e) => AddSignalRequested?.Invoke();
@@ -260,9 +420,9 @@ public partial class BitLayoutControl : UserControl
         for (int s = 0; s < msg.Signals.Count; s++)
         {
             _labels[s] = msg.Signals[s].Name;
-            _sigBits[s] = CollectBits(msg.Signals[s]).ToList();
+            _sigBits[s] = DbcBitLayout.CollectBits(msg.Signals[s]).ToList();
         }
-        // Later in z-order wins overlapping bits (To Front / Arrange)
+        // Later in z-order wins overlapping bits for paint
         foreach (var sg in _zOrder)
         {
             int s = msg.Signals.IndexOf(sg);
@@ -272,24 +432,19 @@ public partial class BitLayoutControl : UserControl
                 if (b >= 0 && b < total) _owner[b] = s;
             }
         }
+        _overlap = DbcBitLayout.FindOverlappingSignals(msg.Signals);
     }
 
-    /// <summary>Vector / BUSMASTER: Intel +=1; Motorola: within-byte reverse, then +15 at byte boundary.</summary>
-    public static IEnumerable<int> CollectBits(DbcSignal sg)
-    {
-        int bit = sg.StartBit;
-        for (int i = 0; i < sg.Length; i++)
-        {
-            yield return bit;
-            if (i + 1 >= sg.Length) break;
-            if (sg.IsLittleEndian) bit += 1;
-            else if (bit % 8 == 0) bit += 15;
-            else bit -= 1;
-        }
-    }
+    /// <summary>Vector / BUSMASTER bit walk — see <see cref="DbcBitLayout.CollectBits"/>.</summary>
+    public static IEnumerable<int> CollectBits(DbcSignal sg) => DbcBitLayout.CollectBits(sg);
 
-    private int BitInByteToCol(int bitInByte) => _inverted ? bitInByte : 7 - bitInByte;
-    private int ColToBitInByte(int col) => _inverted ? col : 7 - col;
+    /// <summary>
+    /// Vector: signal blocks always sit on sawtooth columns (bit7 left … bit0 right).
+    /// Inverted only remaps the printed index / column header (absBit ⊕ 7 within byte).
+    /// </summary>
+    private static int BitInByteToCol(int bitInByte) => 7 - bitInByte;
+    private static int ColToBitInByte(int col) => 7 - col;
+    private static int DisplayBitIndex(int absBit) => absBit ^ 7;
 
     private void Redraw()
     {
@@ -377,7 +532,7 @@ public partial class BitLayoutControl : UserControl
         DrawText(dc, "Multiplexor Signal:  -- No Multiplexor --",
             typeface, 11, Color.FromRgb(40, 40, 40), LeftGutter, 8, dpi);
 
-        /* Column headers */
+        /* Column headers: Normal 7..0; Inverted 0..7 — blocks stay put */
         for (int col = 0; col < 8; col++)
         {
             int label = _inverted ? col : 7 - col;
@@ -423,7 +578,8 @@ public partial class BitLayoutControl : UserControl
                     GetMsbLsb(si, out int msb, out int lsb);
                     if (absBit == msb || absBit == lsb) endCell = true;
                 }
-                var bn = Fmt(absBit.ToString(CultureInfo.InvariantCulture), typeface, 10,
+                int shown = _inverted ? DisplayBitIndex(absBit) : absBit;
+                var bn = Fmt(shown.ToString(CultureInfo.InvariantCulture), typeface, 10,
                     si >= 0 ? Color.FromRgb(70, 70, 70) : Color.FromRgb(180, 180, 180), dpi);
                 double bx = endCell
                     ? cell.Left + cell.Width / 2 + (cell.Width / 2 - bn.Width) - 3
@@ -436,6 +592,51 @@ public partial class BitLayoutControl : UserControl
             DrawSignalMsbLsbArrow(dc, typeface, dpi, s, first, last);
         if (_selSig >= 0)
             DrawSelectionRed(dc, _selSig, first, last);
+        else if (PendingInsertAbsBit >= 0)
+            DrawInsertRowHighlight(dc, PendingInsertAbsBit, first, last);
+
+        /* Vector: yellow ! on overlapping signals (allowed, but warned). */
+        var msg = Message;
+        if (msg != null)
+        {
+            for (int s = 0; s < msg.Signals.Count; s++)
+            {
+                if (_overlap.Contains(msg.Signals[s]))
+                    DrawOverlapMark(dc, s, first, last);
+            }
+        }
+    }
+
+    private void DrawInsertRowHighlight(DrawingContext dc, int absBit, int first, int last)
+    {
+        int byteIdx = absBit / 8;
+        if (byteIdx < first || byteIdx >= last) return;
+        double y = _topHeader + (byteIdx - first) * _cellH;
+        var pen = new Pen(new SolidColorBrush(Color.FromRgb(220, 0, 0)), 2);
+        pen.Freeze();
+        dc.DrawRectangle(null, pen, new Rect(LeftGutter, y, 8 * _cellW, _cellH));
+    }
+
+    private void DrawOverlapMark(DrawingContext dc, int sigIndex, int first, int last)
+    {
+        if (sigIndex < 0 || sigIndex >= _sigBits.Length || _sigBits[sigIndex].Count == 0) return;
+        if (!TryGetNameBand(sigIndex, first, last, out int nameRow, out int drawMin, out _))
+            return;
+        double x = LeftGutter + drawMin * _cellW + 2;
+        double y = _topHeader + nameRow * _cellH + 2;
+        var fill = new SolidColorBrush(Color.FromRgb(255, 193, 7));
+        fill.Freeze();
+        var stroke = new Pen(new SolidColorBrush(Color.FromRgb(183, 28, 28)), 0.8);
+        stroke.Freeze();
+        var geo = new PathGeometry();
+        var fig = new PathFigure { StartPoint = new Point(x + 6, y), IsClosed = true };
+        fig.Segments.Add(new LineSegment(new Point(x + 12, y + 11), true));
+        fig.Segments.Add(new LineSegment(new Point(x, y + 11), true));
+        geo.Figures.Add(fig);
+        dc.DrawGeometry(fill, stroke, geo);
+        var bang = Fmt("!", new Typeface("Tahoma"), 8, Color.FromRgb(183, 28, 28),
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        dc.DrawText(bang, new Point(x + 6 - bang.Width / 2, y + 2));
     }
 
     /// <summary>
@@ -649,7 +850,7 @@ public partial class BitLayoutControl : UserControl
             GetMsbLsb(_selSig, out int msb, out int lsb);
             StatusTip.Foreground = new SolidColorBrush(Color.FromRgb(160, 0, 0));
             StatusTip.Text =
-                $"Selected: {sg.Name} | start={sg.StartBit} len={sg.Length} " +
+                $"Selected: {sg.Name} | start={DbcBitLayout.VectorStartBit(sg)} len={sg.Length} " +
                 $"{(sg.IsLittleEndian ? "Intel" : "Motorola")} {(sg.IsSigned ? "Signed" : "Unsigned")} | " +
                 $"msb={msb} lsb={lsb} | unit={(string.IsNullOrEmpty(sg.Unit) ? "-" : sg.Unit)} | " +
                 $"{(_inverted ? "Inverted" : "Normal")} / {(_paged ? "Paged" : "Tiled")}";
@@ -657,19 +858,82 @@ public partial class BitLayoutControl : UserControl
         else
         {
             StatusTip.Foreground = new SolidColorBrush(Color.FromRgb(100, 100, 100));
-            StatusTip.Text = "Bit index Inverted / Tiled|Paged. Click a signal for red selection.";
+            if (PendingInsertAbsBit >= 0)
+            {
+                StatusTip.Foreground = new SolidColorBrush(Color.FromRgb(0, 90, 160));
+                StatusTip.Text =
+                    $"Insert at byte {PendingInsertAbsBit / 8} (bit {PendingInsertAbsBit}). Add... places a signal here. Drag signals freely; overlaps show !.";
+            }
+            else
+            {
+                StatusTip.Text =
+                    "Click a byte row then Add.... Drag signals to move (overlaps allowed, warned with !).";
+            }
         }
     }
 
     private void OnCanvasClick(object sender, MouseButtonEventArgs e)
     {
+        /* MouseLeftButtonDown — start potential drag or click. */
         Focus();
         var p = e.GetPosition(DrawHost);
+        _mouseDownPt = p;
+        _mouseDownAbsBit = HitAbsBit(p);
+        _mouseDownSig = HitTest(p);
+        _dragging = false;
+        _dragOrigStartBit = -1;
+        if (_mouseDownSig >= 0 && Message != null && _mouseDownSig < Message.Signals.Count)
+            _dragOrigStartBit = Message.Signals[_mouseDownSig].StartBit;
+        DrawHost.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnCanvasMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var p = e.GetPosition(DrawHost);
+        var msg = Message;
+        if (_dragging && _mouseDownSig >= 0 && msg != null && _mouseDownSig < msg.Signals.Count)
+        {
+            /* Vector: drag freely — overlaps allowed; warnings shown after. */
+            int drop = HitAbsBit(p);
+            if (drop >= 0)
+            {
+                var sg = msg.Signals[_mouseDownSig];
+                sg.StartBit = DbcBitLayout.StartBitForDrop(sg, drop);
+            }
+            SelectedSignal = msg.Signals[_mouseDownSig];
+            _selSig = _mouseDownSig;
+            PendingInsertAbsBit = drop >= 0 ? drop : PendingInsertAbsBit;
+            RebuildMap();
+            Redraw();
+            UpdateStatus();
+            UpdateLayoutButtons();
+            LayoutSignalsChanged?.Invoke();
+        }
+        else
+        {
+            FinishClickSelect(p);
+        }
+
+        _dragging = false;
+        _mouseDownSig = -1;
+        _dragOrigStartBit = -1;
+        if (DrawHost.IsMouseCaptured)
+            DrawHost.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    private void FinishClickSelect(Point p)
+    {
         int hit = HitTest(p);
+        int abs = HitAbsBit(p);
         var now = DateTime.UtcNow;
         bool dbl = hit >= 0 && hit == _lastClickSig && (now - _lastClick).TotalMilliseconds < 400;
         _lastClick = now;
         _lastClickSig = hit;
+
+        if (abs >= 0)
+            PendingInsertAbsBit = abs;
 
         if (hit == _selSig && !dbl)
             _selSig = -1;
@@ -686,15 +950,42 @@ public partial class BitLayoutControl : UserControl
         UpdateStatus();
         UpdateLayoutButtons();
         Redraw();
-        e.Handled = true;
     }
-
-    private void OnCanvasMouseUp(object sender, MouseButtonEventArgs e) { }
 
     private void OnCanvasMouseMove(object sender, MouseEventArgs e)
     {
+        var p = e.GetPosition(DrawHost);
+        if (e.LeftButton == MouseButtonState.Pressed && _mouseDownSig >= 0 && Message != null
+            && _mouseDownSig < Message.Signals.Count)
+        {
+            double dx = p.X - _mouseDownPt.X;
+            double dy = p.Y - _mouseDownPt.Y;
+            if (!_dragging && (dx * dx + dy * dy) >= 16)
+                _dragging = true;
+
+            if (_dragging)
+            {
+                HideNameTip();
+                int drop = HitAbsBit(p);
+                if (drop >= 0)
+                {
+                    var sg = Message.Signals[_mouseDownSig];
+                    int next = DbcBitLayout.StartBitForDrop(sg, drop);
+                    if (sg.StartBit != next)
+                    {
+                        sg.StartBit = next;
+                        _selSig = _mouseDownSig;
+                        SelectedSignal = sg;
+                        RebuildMap();
+                        Redraw();
+                    }
+                }
+                return;
+            }
+        }
+
         if (NameTip == null || NameTipText == null) return;
-        int hit = HitTest(e.GetPosition(DrawHost));
+        int hit = HitTest(p);
         if (hit >= 0 && hit < _nameTruncated.Length && _nameTruncated[hit] &&
             hit < _labels.Length && !string.IsNullOrEmpty(_labels[hit]))
         {
@@ -705,7 +996,6 @@ public partial class BitLayoutControl : UserControl
             }
             if (!NameTip.IsOpen)
                 NameTip.IsOpen = true;
-            // Re-place beside cursor each move
             NameTip.HorizontalOffset = 12;
             NameTip.VerticalOffset = 14;
         }
@@ -724,17 +1014,22 @@ public partial class BitLayoutControl : UserControl
             NameTip.IsOpen = false;
     }
 
-    private int HitTest(Point pt)
+    private int HitAbsBit(Point pt)
     {
         int first = FirstVisibleByte();
         int last = _paged ? Math.Min(_dlc, first + BytesPerPage) : _dlc;
-        if (pt.Y < _topHeader || pt.X < LeftGutter) return -1;
+        if (pt.Y < _topHeader || pt.X < LeftGutter || _cellH <= 0 || _cellW <= 0) return -1;
         int row = (int)((pt.Y - _topHeader) / _cellH);
         int col = (int)((pt.X - LeftGutter) / _cellW);
         if (col < 0 || col > 7) return -1;
         int byteIdx = first + row;
         if (byteIdx < first || byteIdx >= last) return -1;
-        int absBit = byteIdx * 8 + ColToBitInByte(col);
+        return byteIdx * 8 + ColToBitInByte(col);
+    }
+
+    private int HitTest(Point pt)
+    {
+        int absBit = HitAbsBit(pt);
         if (absBit < 0 || absBit >= _owner.Length) return -1;
         return _owner[absBit];
     }

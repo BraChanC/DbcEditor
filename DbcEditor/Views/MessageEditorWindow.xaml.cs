@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using DbcEditor.Models;
 using DbcEditor.Services;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace DbcEditor.Views;
 
@@ -17,6 +18,10 @@ public partial class MessageEditorWindow : Window
 {
     private readonly DbcDatabase _db;
     private readonly DbcMessage _model;
+    /// <summary>StartBit at open / last Apply — To Front/Back/drag revert on Cancel.</summary>
+    private readonly Dictionary<DbcSignal, int> _startBitSnapshot = new();
+    private bool _layoutCommitted;
+
     public MessageEditorVm Vm { get; }
 
     public MessageEditorWindow(DbcDatabase db, DbcMessage model)
@@ -27,6 +32,8 @@ public partial class MessageEditorWindow : Window
         Vm = new MessageEditorVm(db, model);
         DataContext = Vm;
         Title = $"Message '{model.Name} ({model.IdHex})'";
+        CaptureStartBitSnapshot();
+        Closing += OnWindowClosing;
         BitLayout.SignalActivated += s => OpenSignal(s);
         BitLayout.EditSignalRequested += () =>
         {
@@ -39,6 +46,40 @@ public partial class MessageEditorWindow : Window
             Vm.RemoveSelectedSignal();
             RefreshBitLayout();
         };
+        BitLayout.LayoutSignalsChanged += () =>
+        {
+            /* To Front/Back / drag: keep the same signal selected after list+layout refresh. */
+            var sel = BitLayout.SelectedSignal ?? Vm.SelectedSignal;
+            Vm.RefreshSignals();
+            if (sel != null)
+                Vm.SelectedSignal = sel;
+            RefreshBitLayout(sel);
+        };
+    }
+
+    private void CaptureStartBitSnapshot()
+    {
+        _startBitSnapshot.Clear();
+        foreach (var s in _model.Signals)
+            _startBitSnapshot[s] = s.StartBit;
+    }
+
+    private void RestoreStartBitsIfNeeded()
+    {
+        if (_layoutCommitted) return;
+        foreach (var kv in _startBitSnapshot)
+        {
+            if (_model.Signals.Contains(kv.Key))
+                kv.Key.StartBit = kv.Value;
+        }
+    }
+
+    private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        /* 未点确定/应用：To Front、To Back、拖动的 StartBit 不生效 */
+        if (DialogResult == true)
+            _layoutCommitted = true;
+        RestoreStartBitsIfNeeded();
     }
 
     private void OnAttributeCommitted(object sender, Controls.AttrCommittedEventArgs e) =>
@@ -47,12 +88,16 @@ public partial class MessageEditorWindow : Window
     private void OnOk(object sender, RoutedEventArgs e)
     {
         Vm.ApplyTo(_model);
+        _layoutCommitted = true;
         DialogResult = true;
     }
 
     private void OnApply(object sender, RoutedEventArgs e)
     {
         Vm.ApplyTo(_model);
+        _layoutCommitted = true;
+        CaptureStartBitSnapshot(); /* 应用后作为新基线；之后再取消只回滚此后的改动 */
+        _layoutCommitted = false;
         BitLayout.Message = null;
         BitLayout.Message = _model;
         Title = $"Message '{_model.Name} ({_model.IdHex})'";
@@ -80,8 +125,10 @@ public partial class MessageEditorWindow : Window
             };
             if (dlg.ShowDialog() == true && dlg.SelectedSignals.Count > 0)
             {
+                foreach (var s in dlg.SelectedSignals)
+                    BitLayout.ApplyInsertPosition(s);
                 Vm.AddSignals(dlg.SelectedSignals);
-                RefreshBitLayout();
+                RefreshBitLayout(dlg.SelectedSignals.LastOrDefault());
                 return;
             }
             if (dlg.DialogResult != true) return;
@@ -89,6 +136,8 @@ public partial class MessageEditorWindow : Window
 
         // No other signals to pick — create a new one (Vector Add on empty set)
         var created = Vm.CreateNewSignal();
+        BitLayout.ApplyInsertPosition(created);
+        Vm.RefreshSignals();
         RefreshBitLayout(created);
         OpenSignal(created);
     }
@@ -128,10 +177,12 @@ public partial class MessageEditorWindow : Window
 
     private void OpenSignal(DbcSignal s)
     {
-        // Vector: opened from Message → Attributes empty (not Signals catalog)
-        var dlg = new SignalEditorWindow(_db, s, _model, catalogAttributes: false) { Owner = this };
+        // Vector Message editor → Message Signal 'Msg::Sig'
+        var dlg = new MessageSignalEditorWindow(_db, _model, s) { Owner = this };
         if (dlg.ShowDialog() == true)
         {
+            /* Nested 确定: accept that signal's StartBit into the cancel-baseline. */
+            _startBitSnapshot[s] = s.StartBit;
             Vm.RefreshSignals();
             RefreshBitLayout(s);
         }
@@ -292,6 +343,8 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
 
     public void RefreshSignals()
     {
+        var keep = SelectedSignal;
+        var overlapping = DbcBitLayout.FindOverlappingSignals(_src.Signals);
         SignalRows.Clear();
         foreach (var s in _src.Signals)
         {
@@ -301,12 +354,17 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
                 Name = s.Name,
                 Message = string.IsNullOrEmpty(s.MessageName) ? _src.Name : s.MessageName,
                 Multiplexing = string.IsNullOrWhiteSpace(s.Multiplexing) ? "-" : s.Multiplexing,
-                StartBit = s.StartBit,
+                StartBit = DbcBitLayout.VectorStartBit(s),
                 Length = s.Length,
                 ByteOrder = s.IsLittleEndian ? "Intel" : "Motorola",
-                ValueType = s.IsSigned ? "Signed" : "Unsigned"
+                ValueType = s.IsSigned ? "Signed" : "Unsigned",
+                HasOverlapWarning = overlapping.Contains(s),
+                OverlapTooltip = overlapping.Contains(s) ? DbcBitLayout.OverlapTooltip(s) : ""
             });
         }
+        /* Clear() drops DataGrid selection — restore so To Front keeps highlight. */
+        if (keep != null && _src.Signals.Contains(keep))
+            SelectedSignal = keep;
     }
 
     private void BuildTransmitters()
@@ -347,7 +405,7 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
         {
             Name = name,
             StartBit = 0,
-            Length = 1,
+            Length = 8,
             IsLittleEndian = false,
             MessageName = _src.Name,
             MessageId = _src.Id,
@@ -619,7 +677,7 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
 }
 
-public sealed class MsgSignalRow
+public partial class MsgSignalRow : ObservableObject
 {
     public DbcSignal Model { get; set; } = null!;
     public string Name { get; set; } = "";
@@ -629,6 +687,8 @@ public sealed class MsgSignalRow
     public int Length { get; set; }
     public string ByteOrder { get; set; } = "Motorola";
     public string ValueType { get; set; } = "Unsigned";
+    [ObservableProperty] private bool _hasOverlapWarning;
+    [ObservableProperty] private string _overlapTooltip = "";
 }
 
 public sealed class MsgNodeRow

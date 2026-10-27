@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using DbcEditor.Models;
+using DbcEditor.Services;
 
 namespace DbcEditor.Views;
 
@@ -297,7 +298,7 @@ public sealed class ChooseSignalRow : INotifyPropertyChanged
     public string Message => Model.MessageName;
     public string Multiplexing =>
         string.IsNullOrWhiteSpace(Model.Multiplexing) ? "-" : Model.Multiplexing;
-    public int Startbit => Model.StartBit;
+    public int Startbit => DbcBitLayout.VectorStartBit(Model);
     public int Length => Model.Length;
     public string ByteOrder => Model.IsLittleEndian ? "Intel" : "Motorola";
     public string ValueType => Model.IsSigned ? "Signed" : "Unsigned";
