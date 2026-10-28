@@ -516,12 +516,15 @@ public partial class MainViewModel : ObservableObject
             foreach (var name in g.SignalNames)
                 grouped.Add(name);
 
-        foreach (var s in m.Signals)
+        // Vector lists signals directly under the message in reverse SG_ order.
+        // Members inside a Signal Group stay in Windows name order below.
+        for (int i = m.Signals.Count - 1; i >= 0; i--)
         {
+            var s = m.Signals[i];
             if (!grouped.Contains(s.Name))
                 item.Children.Add(BuildSignalTreeItem(s, "MessageSignal"));
         }
-        foreach (var g in groups)
+        foreach (var g in groups.OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase))
         {
             var groupNode = new TreeItemViewModel
             {
@@ -529,7 +532,7 @@ public partial class MainViewModel : ObservableObject
                 Kind = "SignalGroup",
                 Payload = g
             };
-            foreach (var name in g.SignalNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            foreach (var name in g.SignalNames.OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase))
             {
                 var sig = m.Signals.FirstOrDefault(s =>
                     string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -550,7 +553,7 @@ public partial class MainViewModel : ObservableObject
         if (_db == null) return list;
         var msg = _db.Messages.FirstOrDefault(m => SameMessageId(grp.MessageId, m));
         if (msg == null) return list;
-        foreach (var name in grp.SignalNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+        foreach (var name in grp.SignalNames.OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase))
         {
             var sig = msg.Signals.FirstOrDefault(s =>
                 string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));

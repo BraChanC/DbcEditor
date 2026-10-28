@@ -133,7 +133,7 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
     public DbcDatabase Database => _db;
     public ObservableCollection<NetworkRefRow> Networks { get; } = new();
     public ObservableCollection<string> ControlUnits { get; } = new();
-    public ObservableCollection<EditableAttrGroup> AttributeGroups { get; } = new();
+    public ObservableCollection<object> AttributeGroups { get; } = new();
     private DbcNode? _node;
 
     public void CommitAttribute(string name, string value)
@@ -145,17 +145,27 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
               : value.Equals("no", StringComparison.OrdinalIgnoreCase) ? "0" : value
             : value;
         _node.Attributes[name] = raw;
-        foreach (var g in AttributeGroups)
-        foreach (var item in g.Children)
+        foreach (var entry in AttributeGroups)
         {
-            if (!string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+            if (entry is EditableAttrItem root)
+                TouchDefault(root);
+            else if (entry is EditableAttrGroup g)
+            {
+                foreach (var item in g.Children)
+                    TouchDefault(item);
+            }
+        }
+
+        void TouchDefault(EditableAttrItem item)
+        {
+            if (!string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)) return;
             item.Value = value;
             var def = _db.AttrDefs.FirstOrDefault(a =>
                 a.ObjectType == "BU_" &&
                 string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
             item.IsDefault = def != null && (
-                string.Equals(def.DefaultValue, raw, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(DisplayBuAttr(name, def.DefaultValue), value, StringComparison.OrdinalIgnoreCase));
+                string.Equals(def.DefaultValue ?? "", raw, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(DisplayBuAttr(name, FallbackBu(def)), value, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -249,9 +259,7 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
                          string.Equals(r, nodeName, StringComparison.OrdinalIgnoreCase)))))
             RxMessages.Add(m);
 
-        foreach (var s in db.AllSignals.Where(s =>
-                     s.Receivers.Any(r => string.Equals(r, nodeName, StringComparison.OrdinalIgnoreCase))))
-            RxSignals.Add(s);
+        RebuildRxSignals();
 
         BuildAttributes(node);
     }
@@ -270,26 +278,46 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
         var nodeName = CurrentNodeName;
         TxMessages.Clear();
         TxSignals.Clear();
-        foreach (var m in _db.Messages.Where(m => NodeTransmits(m, nodeName)))
-        {
+        var tx = _db.Messages.Where(m => NodeTransmits(m, nodeName)).ToList();
+        foreach (var m in tx)
             TxMessages.Add(m);
+        foreach (var m in tx.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+        {
             foreach (var s in m.Signals)
                 TxSignals.Add(s);
         }
     }
+
+    private void RebuildRxSignals()
+    {
+        var nodeName = CurrentNodeName;
+        RxSignals.Clear();
+        var rx = _db.Messages.Where(m =>
+            m.Signals.Any(s => NodeReceives(s, nodeName))).ToList();
+        foreach (var m in rx.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var s in m.Signals)
+            {
+                if (NodeReceives(s, nodeName))
+                    RxSignals.Add(s);
+            }
+        }
+    }
+
+    private static bool NodeReceives(DbcSignal s, string nodeName) =>
+        s.Receivers.Any(r => string.Equals(r, nodeName, StringComparison.OrdinalIgnoreCase));
 
     public void AddRxSignals(IEnumerable<DbcSignal> signals)
     {
         var nodeName = CurrentNodeName;
         foreach (var s in signals)
         {
-            if (s.Receivers.Any(r => string.Equals(r, nodeName, StringComparison.OrdinalIgnoreCase)))
+            if (NodeReceives(s, nodeName))
                 continue;
             s.Receivers.RemoveAll(r => r == "Vector__XXX");
             s.Receivers.Add(nodeName);
-            if (!RxSignals.Contains(s))
-                RxSignals.Add(s);
         }
+        RebuildRxSignals();
         RefreshRxMessages();
     }
 
@@ -326,23 +354,20 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
         AttributeGroups.Clear();
         var canoe = new EditableAttrGroup { Name = "CANoe" };
         var netMgmt = new EditableAttrGroup { Name = "Net Management" };
-        var other = new EditableAttrGroup { Name = "No category assigned" };
+        var loose = new List<EditableAttrItem>();
         var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void Add(string name, string value, bool isDefault)
         {
             if (string.IsNullOrEmpty(name) || !shown.Add(name)) return;
-            PickGroup(name).Children.Add(EditableAttrItem.FromDef(_db, "BU_", name, value, isDefault));
-        }
-
-        EditableAttrGroup PickGroup(string name)
-        {
-            if (name.Equals("NodeLayerModules", StringComparison.OrdinalIgnoreCase) ||
-                name.StartsWith("CANoe", StringComparison.OrdinalIgnoreCase))
-                return canoe;
-            if (name.StartsWith("Nm", StringComparison.OrdinalIgnoreCase))
-                return netMgmt;
-            return other;
+            var item = EditableAttrItem.FromDef(_db, "BU_", name, value, isDefault);
+            if (name.StartsWith("CANoe", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("NodeLayerModules", StringComparison.OrdinalIgnoreCase))
+                canoe.Children.Add(item);
+            else if (name.StartsWith("Nm", StringComparison.OrdinalIgnoreCase))
+                netMgmt.Children.Add(item);
+            else
+                loose.Add(item);
         }
 
         bool HasBuDef(string name) =>
@@ -352,7 +377,6 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
 
         (string? value, bool isDefault) Resolve(string name)
         {
-            // Vector: no BA_DEF_ BU_ → attribute (and its category) must not appear
             if (!HasBuDef(name)) return (null, false);
 
             if (node != null && node.Attributes.TryGetValue(name, out var v) && v != null)
@@ -361,9 +385,7 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
             var def = _db.AttrDefs.First(a =>
                 a.ObjectType == "BU_" &&
                 string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(def.DefaultValue))
-                return (DisplayBuAttr(name, def.DefaultValue), true);
-            return (null, false);
+            return (DisplayBuAttr(name, FallbackBu(def)), true);
         }
 
         bool IsDefault(string name, string value)
@@ -371,25 +393,10 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
             var def = _db.AttrDefs.FirstOrDefault(a =>
                 a.ObjectType == "BU_" &&
                 string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (def == null || string.IsNullOrEmpty(def.DefaultValue)) return false;
-            return string.Equals(def.DefaultValue, value, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(DisplayBuAttr(name, def.DefaultValue), DisplayBuAttr(name, value),
-                       StringComparison.OrdinalIgnoreCase);
-        }
-
-        foreach (var prefer in new[] { "NodeLayerModules", "NmNode", "NmStationAddress", "NmNodeId" })
-        {
-            var (val, isDef) = Resolve(prefer);
-            if (val != null) Add(prefer, val, isDef);
-        }
-
-        if (node != null)
-        {
-            foreach (var kv in node.Attributes)
-            {
-                if (!HasBuDef(kv.Key)) continue;
-                Add(kv.Key, DisplayBuAttr(kv.Key, kv.Value), IsDefault(kv.Key, kv.Value));
-            }
+            if (def == null) return false;
+            var fallback = DisplayBuAttr(name, FallbackBu(def));
+            return string.Equals(def.DefaultValue ?? "", value, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(fallback, DisplayBuAttr(name, value), StringComparison.OrdinalIgnoreCase);
         }
 
         foreach (var d in _db.AttrDefs.Where(a => a.ObjectType == "BU_"))
@@ -398,12 +405,35 @@ public sealed class NodeEditorVm : INotifyPropertyChanged
             if (val != null) Add(d.Name, val, isDef);
         }
 
-        // Empty groups stay hidden — matches Vector (no CANoe/NM section without defs)
-        if (canoe.Children.Count > 0) AttributeGroups.Add(canoe);
-        if (netMgmt.Children.Count > 0) AttributeGroups.Add(netMgmt);
-        if (other.Children.Count > 0) AttributeGroups.Add(other);
+        SortChildren(canoe);
+        SortChildren(netMgmt);
+
+        var roots = new List<(string Key, object Node)>();
+        if (canoe.Children.Count > 0) roots.Add(("CANoe", canoe));
+        if (netMgmt.Children.Count > 0) roots.Add(("Net Management", netMgmt));
+        foreach (var item in loose)
+            roots.Add((item.Name, item));
+        foreach (var row in roots.OrderBy(r => r.Key, StringComparer.OrdinalIgnoreCase))
+            AttributeGroups.Add(row.Node);
         if (AttributeGroups.Count == 0)
             AttributeGroups.Add(new EditableAttrGroup { Name = "(no node attributes)" });
+    }
+
+    private static void SortChildren(EditableAttrGroup group)
+    {
+        var ordered = group.Children.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        group.Children.Clear();
+        foreach (var c in ordered)
+            group.Children.Add(c);
+    }
+
+    /// <summary>No BA_DEF_DEF_: INT/HEX/FLOAT show the minimum (Vector 0*); STRING shows blank (*).</summary>
+    private static string FallbackBu(DbcAttrDef def)
+    {
+        if (!string.IsNullOrEmpty(def.DefaultValue)) return def.DefaultValue;
+        if (def.ValueType is "INT" or "HEX" or "FLOAT")
+            return string.IsNullOrEmpty(def.Minimum) ? "0" : def.Minimum;
+        return "";
     }
 
     private static string DisplayBuAttr(string name, string raw)

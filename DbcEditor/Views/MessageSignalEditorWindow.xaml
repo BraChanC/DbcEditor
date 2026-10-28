@@ -170,8 +170,10 @@
         <DockPanel Margin="8">
           <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
             <Button Content="Add..." Width="72" Height="23" Margin="0,0,8,0" Click="OnAddReceiver"/>
-            <Button Content="Remove" Width="72" Height="23"
+            <Button Content="Remove" Width="72" Height="23" Margin="0,0,8,0"
                     Click="OnRemoveReceiver" IsEnabled="{Binding HasSelectedReceiver}"/>
+            <Button Content="View..." Width="72" Height="23"
+                    Click="OnViewReceiver" IsEnabled="{Binding HasSelectedReceiver}"/>
           </StackPanel>
           <DataGrid ItemsSource="{Binding ReceiverNodes}" AutoGenerateColumns="False" IsReadOnly="True"
                     HeadersVisibility="Column" CanUserAddRows="False"

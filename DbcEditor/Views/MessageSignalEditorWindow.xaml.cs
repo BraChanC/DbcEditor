@@ -123,6 +123,13 @@ public partial class MessageSignalEditorWindow : Window
 
     private void OnRemoveReceiver(object sender, RoutedEventArgs e) => Vm.RemoveSelectedReceiver();
 
+    private void OnViewReceiver(object sender, RoutedEventArgs e)
+    {
+        var name = Vm.SelectedReceiver?.Name;
+        if (string.IsNullOrWhiteSpace(name)) return;
+        new NodeEditorWindow(_db, name) { Owner = this }.ShowDialog();
+    }
+
     private void OnTabsSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_tabsReady || _suppressTabWarn) return;
