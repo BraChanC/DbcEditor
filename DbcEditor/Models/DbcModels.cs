@@ -162,6 +162,14 @@ public sealed class DbcSignal
     public string FilterSource { get; set; } = "";
 }
 
+/// <summary>Layout tab multiplexer filter. Value null means “No Multiplexer”.</summary>
+public sealed class LayoutMuxOption
+{
+    public string Label { get; init; } = "- No Multiplexer -";
+    public string? MultiplexorName { get; init; }
+    public int? Value { get; init; }
+}
+
 public sealed class DbcValueDesc
 {
     public long Value { get; set; }

@@ -249,7 +249,19 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
         }
     }
 
-    public List<string> MultiplexorOptions { get; } = new() { "- No Multiplexor -" };
+    public ObservableCollection<LayoutMuxOption> MuxOptions { get; } = new();
+    public bool HasMuxChoices => MuxOptions.Count > 1;
+
+    private LayoutMuxOption? _selectedMuxOption;
+    public LayoutMuxOption? SelectedMuxOption
+    {
+        get => _selectedMuxOption;
+        set
+        {
+            _selectedMuxOption = value;
+            OnPropertyChanged();
+        }
+    }
     public List<string> IdFormats { get; } = new()
     {
         "CAN Standard", "CAN Extended", "CAN FD Standard", "CAN FD Extended"
@@ -336,6 +348,7 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
             TransmitterOptions.Add(Transmitter);
 
         RefreshSignals();
+        BuildMuxOptions();
         BuildTransmitters();
         BuildReceivers();
         BuildAttributes();
@@ -365,6 +378,105 @@ public sealed class MessageEditorVm : INotifyPropertyChanged
         /* Clear() drops DataGrid selection — restore so To Front keeps highlight. */
         if (keep != null && _src.Signals.Contains(keep))
             SelectedSignal = keep;
+    }
+
+    /// <summary>
+    /// Vector Layout combo: “- No Multiplexer -”, then each multiplexor value
+    /// as “Name = 0x20 (Time Sync Frame)”.
+    /// </summary>
+    private void BuildMuxOptions()
+    {
+        MuxOptions.Clear();
+        var none = new LayoutMuxOption();
+        MuxOptions.Add(none);
+
+        foreach (var muxor in _src.Signals)
+        {
+            if (!IsMultiplexorSignal(muxor)) continue;
+            var values = new SortedDictionary<int, string>();
+            foreach (var vd in muxor.ValueDescriptions)
+            {
+                if (vd.Value < int.MinValue || vd.Value > int.MaxValue) continue;
+                values[(int)vd.Value] = vd.Description ?? "";
+            }
+            foreach (var s in _src.Signals)
+            {
+                if (ReferenceEquals(s, muxor)) continue;
+                foreach (var v in SwitchValuesFor(s, muxor))
+                    values.TryAdd(v, "");
+            }
+            foreach (var kv in values)
+            {
+                var hex = kv.Key < 0 ? $"-0x{-kv.Key:X}" : $"0x{kv.Key:X}";
+                MuxOptions.Add(new LayoutMuxOption
+                {
+                    Label = string.IsNullOrEmpty(kv.Value)
+                        ? $"{muxor.Name} = {hex}"
+                        : $"{muxor.Name} = {hex} ({kv.Value})",
+                    MultiplexorName = muxor.Name,
+                    Value = kv.Key
+                });
+            }
+        }
+
+        _selectedMuxOption = none;
+        OnPropertyChanged(nameof(SelectedMuxOption));
+        OnPropertyChanged(nameof(HasMuxChoices));
+    }
+
+    private static bool IsMultiplexorSignal(DbcSignal s)
+    {
+        var mux = (s.Multiplexing ?? "").Trim();
+        return mux.Equals("Multiplexor", StringComparison.OrdinalIgnoreCase)
+            || mux.EndsWith("/ Multiplexor", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Raw switch values this signal contributes to <paramref name="muxor"/>.</summary>
+    private static IEnumerable<int> SwitchValuesFor(DbcSignal s, DbcSignal muxor)
+    {
+        var t = (s.Multiplexing ?? "").Trim();
+        var basic = System.Text.RegularExpressions.Regex.Match(t,
+            @"^Multiplexed signal\s+(\d+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (basic.Success && int.TryParse(basic.Groups[1].Value, out var n))
+        {
+            var parent = (muxor.Multiplexing ?? "").Trim();
+            if (parent.Equals("Multiplexor", StringComparison.OrdinalIgnoreCase))
+                yield return n;
+            yield break;
+        }
+
+        var ext = System.Text.RegularExpressions.Regex.Match(t,
+            @"^Mux\s+(\S+)\s+\[([^\]]+)\]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!ext.Success) yield break;
+        if (!ext.Groups[1].Value.Equals(muxor.Name, StringComparison.OrdinalIgnoreCase))
+            yield break;
+        foreach (var part in ext.Groups[2].Value.Split(','))
+        {
+            var seg = part.Split('-', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (seg.Length == 1 && int.TryParse(seg[0], out var one))
+            {
+                yield return one;
+                continue;
+            }
+            if (seg.Length != 2 ||
+                !int.TryParse(seg[0], out var lo) ||
+                !int.TryParse(seg[1], out var hi))
+                continue;
+            int a = Math.Min(lo, hi);
+            int b = Math.Max(lo, hi);
+            if (b - a > 32)
+            {
+                yield return a;
+                if (b != a) yield return b;
+            }
+            else
+            {
+                for (int i = a; i <= b; i++)
+                    yield return i;
+            }
+        }
     }
 
     private void BuildTransmitters()

@@ -285,6 +285,25 @@ public static class DbcBitLayout
     }
 
     /// <summary>
+    /// Layout visibility. No value: only signals that are always on the wire (the multiplexor
+    /// and unswitched signals). A value: those, plus signals switched to that raw value.
+    /// </summary>
+    public static bool IsLayoutVisible(DbcSignal sg, string? multiplexorName, int? muxValue)
+    {
+        var mode = MuxModeOf(sg);
+        if (mode.Always) return true;
+        if (muxValue == null) return false;
+        if (!string.IsNullOrEmpty(mode.Parent) &&
+            !string.IsNullOrEmpty(multiplexorName) &&
+            !mode.Parent.Equals(multiplexorName, StringComparison.OrdinalIgnoreCase))
+            return false;
+        foreach (var r in mode.Ranges)
+            if (muxValue.Value >= r.Lo && muxValue.Value <= r.Hi)
+                return true;
+        return false;
+    }
+
+    /// <summary>
     /// Vector Layout drag: drop cell becomes the new StartBit (bit-precise, same row OK).
     /// Intel: StartBit = LSB; Motorola: StartBit = MSB — both equal the clicked abs bit.
     /// </summary>
@@ -416,37 +435,63 @@ public static class DbcBitLayout
         return false;
     }
 
+    /// <summary>One step along the signal order. +1 is toward the back (CollectBits), −1 toward the front.</summary>
+    public static int StepBit(bool isLittleEndian, int bit, int delta)
+    {
+        if (delta == 0) return bit;
+        if (isLittleEndian) return bit + delta;
+        if (delta > 0)
+            return bit % 8 == 0 ? bit + 15 : bit - 1;
+        return bit % 8 == 7 ? bit - 15 : bit + 1;
+    }
+
+    /// <summary>Walk <paramref name="steps"/> along the signal order. Negative walks toward the front.</summary>
+    public static int WalkBits(bool isLittleEndian, int bit, int steps)
+    {
+        int dir = steps < 0 ? -1 : 1;
+        for (int i = 0, n = Math.Abs(steps); i < n; i++)
+        {
+            int next = StepBit(isLittleEndian, bit, dir);
+            if (next < 0) return 0;
+            bit = next;
+        }
+        return bit;
+    }
+
     /// <summary>
-    /// Place <paramref name="follower"/> tightly after <paramref name="ahead"/>
-    /// (Vector: MisAlign follows numTxObjs → after lsb 51 → start=50 → bits 50..48).
+    /// Earliest bit in layout order. Motorola: low byte first, bit7 before bit0.
+    /// Intel: low bit number first.
+    /// </summary>
+    public static int EarliestBit(IEnumerable<int> bits, bool isLittleEndian)
+    {
+        int best = -1;
+        int bestKey = int.MaxValue;
+        foreach (var b in bits)
+        {
+            int key = isLittleEndian ? b : (b / 8) * 8 + (7 - (b % 8));
+            if (key < bestKey)
+            {
+                bestKey = key;
+                best = b;
+            }
+        }
+        return best < 0 ? 0 : best;
+    }
+
+    /// <summary>
+    /// Place <paramref name="follower"/> on the next bit after <paramref name="ahead"/>'s LSB.
+    /// Motorola crosses the byte as bit0 → next byte bit7, not as numeric max+1.
     /// </summary>
     public static int StartBitRightAfter(DbcSignal ahead, DbcSignal follower)
     {
-        int len = Math.Max(1, follower.Length);
         var aheadBits = CollectBits(ahead).ToList();
         if (aheadBits.Count == 0)
             return Math.Max(0, ahead.StartBit);
 
         if (follower.IsLittleEndian)
-        {
-            int after = MaxOccupiedBit(ahead) + 1;
-            return after;
-        }
+            return MaxOccupiedBit(ahead) + 1;
 
-        /* Motorola: prefer same-byte remainder toward bit0 after LSB. */
-        int lsb = aheadBits[^1];
-        int bitInByte = lsb % 8;
-        if (bitInByte >= len)
-        {
-            /* MSB sits on first free bit (lsb-1), field walks toward bit0. */
-            return lsb - 1;
-        }
-
-        int? packed = TryStartBitForMinOccupied(follower, MaxOccupiedBit(ahead) + 1);
-        if (packed != null) return packed.Value;
-
-        int? any = FindCompactStartAt(follower, MaxOccupiedBit(ahead) + 1);
-        return any ?? MaxOccupiedBit(ahead) + len;
+        return Math.Max(0, StepBit(false, aheadBits[^1], +1));
     }
 
     /// <summary>Bit just outside the signal: Front = before MSB, Back = after LSB. Motorola walk.</summary>
@@ -461,12 +506,87 @@ public static class DbcBitLayout
         else
             edge = delta < 0 ? bits[0] : bits[^1];
 
-        if (sg.IsLittleEndian)
-            return edge + delta;
+        return StepBit(sg.IsLittleEndian, edge, delta);
+    }
 
-        if (delta > 0)
-            return edge % 8 == 0 ? edge + 15 : edge - 1;
-        return edge % 8 == 7 ? edge - 15 : edge + 1;
+    /// <summary>
+    /// Nearest other signal toward the front, walking across empty bits.
+    /// The bit immediately before the MSB may be a hole (XVel bit 72, numTxObjs bit 64).
+    /// </summary>
+    public static DbcSignal? NearestSignalTowardFront(IEnumerable<DbcSignal> signals, DbcSignal sg)
+    {
+        int bit = StepOutside(sg, -1);
+        var seen = new HashSet<int>();
+        for (int i = 0; i < 4096 && bit >= 0; i++)
+        {
+            if (!seen.Add(bit)) return null;
+            var hit = SignalAtBit(signals, bit, sg);
+            if (hit != null) return hit;
+            int prev = StepBit(sg.IsLittleEndian, bit, -1);
+            if (prev < 0 || prev == bit) return null;
+            bit = prev;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Nearest other signal toward the back, walking across empty bits.
+    /// MisAlign's next bit is 55, so the signal across that hole is numTxObjs, not Failure.
+    /// </summary>
+    public static DbcSignal? NearestSignalTowardBack(IEnumerable<DbcSignal> signals, DbcSignal sg)
+    {
+        int bit = StepOutside(sg, +1);
+        var seen = new HashSet<int>();
+        for (int i = 0; i < 4096 && bit >= 0 && bit < 65536; i++)
+        {
+            if (!seen.Add(bit)) return null;
+            var hit = SignalAtBit(signals, bit, sg);
+            if (hit != null) return hit;
+            int next = StepBit(sg.IsLittleEndian, bit, +1);
+            if (next < 0 || next == bit) return null;
+            bit = next;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Hole To Back slide (numTxObjs at 55, Timestamp 87→79, numTxObjs takes 111–104).
+    /// The bits just in front of <paramref name="next"/> must be free, and the tail must
+    /// be at least <paramref name="sg"/> long. A shorter neighbor (MeasFlag behind XPos)
+    /// does not fit this slide.
+    /// </summary>
+    public static bool TryHoleSlide(DbcSignal sg, DbcSignal next, IEnumerable<DbcSignal> signals,
+        out int newStart, out int newNextStart)
+    {
+        int oldNext = next.StartBit;
+        int oldLen = next.Length;
+        newNextStart = WalkBits(next.IsLittleEndian, oldNext, -sg.Length);
+        newStart = WalkBits(sg.IsLittleEndian, oldNext, oldLen - sg.Length);
+        if (sg.Length <= 0 || oldLen < sg.Length)
+            return false;
+
+        var probeSg = new DbcSignal
+        {
+            StartBit = newStart,
+            Length = sg.Length,
+            IsLittleEndian = sg.IsLittleEndian
+        };
+        var probeNext = new DbcSignal
+        {
+            StartBit = newNextStart,
+            Length = next.Length,
+            IsLittleEndian = next.IsLittleEndian
+        };
+        if (Overlaps(probeSg, probeNext))
+            return false;
+        foreach (var other in signals)
+        {
+            if (other.Length <= 0 || ReferenceEquals(other, sg) || ReferenceEquals(other, next))
+                continue;
+            if (Overlaps(probeSg, other) || Overlaps(probeNext, other))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>Signal other than <paramref name="sg"/> that occupies <paramref name="absBit"/>.</summary>
@@ -514,25 +634,24 @@ public static class DbcBitLayout
     }
 
     /// <summary>
-    /// Whole layout interchange of two adjacent signals (Vector To Front/Back when touching):
-    /// re-pack from the earlier MinOccupied — do NOT raw-swap StartBit (unequal lengths overlap
-    /// and look like shifting by the shorter signal's length).
-    /// <paramref name="first"/> ends up in front; <paramref name="second"/> follows it.
+    /// Whole layout interchange (Vector To Front/Back when the next bit is occupied).
+    /// <paramref name="first"/> starts at the earliest occupied bit of the pair in layout
+    /// order and keeps its length. <paramref name="second"/> starts on the following bit.
+    /// Numeric min/max is not the Motorola order: bit 24 is immediately before bit 39.
     /// </summary>
     public static void RepackAdjacentPair(DbcSignal first, DbcSignal second)
     {
-        int regionStart = Math.Min(MinOccupiedBit(first), MinOccupiedBit(second));
-        int? firstStart = TryStartBitForMinOccupied(first, regionStart)
-            ?? FindCompactStartAt(first, regionStart);
-        if (firstStart == null)
+        var bits = new List<int>();
+        bits.AddRange(CollectBits(first));
+        bits.AddRange(CollectBits(second));
+        if (bits.Count == 0)
         {
-            /* Fallback: exchange StartBit values. */
             int tmp = first.StartBit;
             first.StartBit = second.StartBit;
             second.StartBit = tmp;
             return;
         }
-        first.StartBit = firstStart.Value;
+        first.StartBit = EarliestBit(bits, first.IsLittleEndian);
         second.StartBit = StartBitRightAfter(first, second);
     }
 

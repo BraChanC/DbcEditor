@@ -147,12 +147,16 @@
       <TabItem Header="Layout">
         <DockPanel Margin="4">
           <DockPanel DockPanel.Dock="Top" Margin="4,4,4,8">
-            <TextBlock Text="Multiplexor Signal:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Width="200" Height="22" IsEnabled="False"
-                      ItemsSource="{Binding MultiplexorOptions}" SelectedIndex="0"/>
+            <TextBlock Text="Multiplexer Signal:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Height="22" MinWidth="360" HorizontalAlignment="Left"
+                      IsEnabled="{Binding HasMuxChoices}"
+                      ItemsSource="{Binding MuxOptions}"
+                      SelectedItem="{Binding SelectedMuxOption}"
+                      DisplayMemberPath="Label"/>
           </DockPanel>
           <ctrl:BitLayoutControl x:Name="BitLayout"
                                  Message="{Binding Model}"
+                                 MuxOption="{Binding SelectedMuxOption}"
                                  SelectedSignal="{Binding SelectedSignal, Mode=TwoWay}"
                                  Margin="2"/>
         </DockPanel>

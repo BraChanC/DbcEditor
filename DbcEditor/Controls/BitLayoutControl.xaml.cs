@@ -18,6 +18,17 @@ public partial class BitLayoutControl : UserControl
         DependencyProperty.Register(nameof(Message), typeof(DbcMessage), typeof(BitLayoutControl),
             new FrameworkPropertyMetadata(null, OnMessageChanged));
 
+    public static readonly DependencyProperty MuxOptionProperty =
+        DependencyProperty.Register(nameof(MuxOption), typeof(LayoutMuxOption), typeof(BitLayoutControl),
+            new FrameworkPropertyMetadata(null, (d, _) =>
+            {
+                if (d is BitLayoutControl c && c.IsLoaded)
+                {
+                    c.Redraw();
+                    c.UpdateLayoutButtons();
+                }
+            }));
+
     public static readonly DependencyProperty SelectedSignalProperty =
         DependencyProperty.Register(nameof(SelectedSignal), typeof(DbcSignal), typeof(BitLayoutControl),
             new FrameworkPropertyMetadata(null,
@@ -27,6 +38,13 @@ public partial class BitLayoutControl : UserControl
     {
         get => (DbcMessage?)GetValue(MessageProperty);
         set => SetValue(MessageProperty, value);
+    }
+
+    /// <summary>Null or Value null: draw only signals that are not multiplexed.</summary>
+    public LayoutMuxOption? MuxOption
+    {
+        get => (LayoutMuxOption?)GetValue(MuxOptionProperty);
+        set => SetValue(MuxOptionProperty, value);
     }
 
     public DbcSignal? SelectedSignal
@@ -166,12 +184,22 @@ public partial class BitLayoutControl : UserControl
         if (BtnArrange != null) BtnArrange.IsEnabled = Message?.Signals.Count > 0;
     }
 
+    private List<DbcSignal> VisibleSignals()
+    {
+        var msg = Message;
+        if (msg == null) return new List<DbcSignal>();
+        var opt = MuxOption;
+        return msg.Signals
+            .Where(s => DbcBitLayout.IsLayoutVisible(s, opt?.MultiplexorName, opt?.Value))
+            .ToList();
+    }
+
     /// <summary>Signals ordered by first occupied bit (layout front → back).</summary>
     private List<DbcSignal> LayoutOrder()
     {
         var msg = Message;
         if (msg == null) return new List<DbcSignal>();
-        return msg.Signals
+        return VisibleSignals()
             .OrderBy(DbcBitLayout.MinOccupiedBit)
             .ThenBy(s => s.StartBit)
             .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
@@ -242,10 +270,11 @@ public partial class BitLayoutControl : UserControl
         int bitIdx = ordered.IndexOf(sg);
         if (bitIdx < 0) return;
 
+        var visible = VisibleSignals();
         if (delta < 0)
-            MoveTowardFront(sg, msg, ordered, bitIdx);
+            MoveTowardFront(sg, msg, visible, bitIdx);
         else
-            MoveTowardBack(sg, msg, ordered);
+            MoveTowardBack(sg, msg, visible);
 
         SyncZOrder();
         _zOrder.Clear();
@@ -268,41 +297,18 @@ public partial class BitLayoutControl : UserControl
     }
 
     /// <summary>
-    /// Previous bit occupied: repack this signal in front of that neighbor.
-    /// Previous bit empty: step onto previous.StartBit - 1; signals under the new footprint follow.
+    /// Move onto the nearest signal toward the front, including across a hole.
+    /// The selected signal keeps its length and starts at that pair's earliest bit;
+    /// the neighbor follows on the next bit. 5E0 numTxObjs crosses the hole onto
+    /// MisAlign (start 42). XVel crosses bit 72 onto heading (start 79).
     /// </summary>
-    private static void MoveTowardFront(DbcSignal sg, DbcMessage msg, List<DbcSignal> ordered, int bitIdx)
+    private static void MoveTowardFront(DbcSignal sg, DbcMessage msg, IReadOnlyList<DbcSignal> visible, int bitIdx)
     {
-        int before = DbcBitLayout.StepOutside(sg, -1);
-        var touch = DbcBitLayout.SignalAtBit(msg.Signals, before, sg);
-        if (touch != null)
-        {
-            DbcBitLayout.RepackAdjacentPair(sg, touch);
-            SwapList(msg, sg, touch);
-            return;
-        }
-
         if (bitIdx <= 0) return;
-        var neighbor = ordered[bitIdx - 1];
-        int newStart = Math.Max(0, neighbor.StartBit - 1);
-        var probe = new DbcSignal
-        {
-            StartBit = newStart,
-            Length = sg.Length,
-            IsLittleEndian = sg.IsLittleEndian
-        };
-        var displaced = msg.Signals
-            .Where(o => !ReferenceEquals(o, sg) && o.Length > 0 && DbcBitLayout.Overlaps(probe, o))
-            .OrderBy(DbcBitLayout.MinOccupiedBit)
-            .ToList();
-
-        sg.StartBit = newStart;
-        var ahead = sg;
-        foreach (var other in displaced)
-        {
-            other.StartBit = DbcBitLayout.StartBitRightAfter(ahead, other);
-            ahead = other;
-        }
+        var across = DbcBitLayout.NearestSignalTowardFront(visible, sg);
+        if (across == null) return;
+        DbcBitLayout.RepackAdjacentPair(sg, across);
+        SwapList(msg, sg, across);
     }
 
     /// <summary>
@@ -311,10 +317,10 @@ public partial class BitLayoutControl : UserControl
     /// Next bit empty: slide the next signal back by this length and take its old tail
     /// (Timestamp 87→79, numTxObjs → 111).
     /// </summary>
-    private static void MoveTowardBack(DbcSignal sg, DbcMessage msg, List<DbcSignal> ordered)
+    private static void MoveTowardBack(DbcSignal sg, DbcMessage msg, IReadOnlyList<DbcSignal> visible)
     {
         int after = DbcBitLayout.StepOutside(sg, +1);
-        var follower = DbcBitLayout.SignalAtBit(msg.Signals, after, sg);
+        var follower = DbcBitLayout.SignalAtBit(visible, after, sg);
         if (follower != null)
         {
             DbcBitLayout.RepackAdjacentPair(follower, sg);
@@ -322,15 +328,18 @@ public partial class BitLayoutControl : UserControl
             return;
         }
 
-        int sgMax = DbcBitLayout.MaxOccupiedBit(sg);
-        var next = ordered.FirstOrDefault(s =>
-            !ReferenceEquals(s, sg) && s.Length > 0 && DbcBitLayout.MinOccupiedBit(s) > sgMax);
+        var next = DbcBitLayout.NearestSignalTowardBack(visible, sg);
         if (next == null) return;
 
-        int oldNext = next.StartBit;
-        int oldLen = next.Length;
-        next.StartBit = Math.Max(0, oldNext - sg.Length);
-        sg.StartBit = Math.Max(0, oldNext + oldLen - sg.Length);
+        if (DbcBitLayout.TryHoleSlide(sg, next, visible, out int newStart, out int newNext))
+        {
+            next.StartBit = newNext;
+            sg.StartBit = newStart;
+        }
+        else
+        {
+            DbcBitLayout.RepackAdjacentPair(next, sg);
+        }
         SwapList(msg, sg, next);
     }
 
@@ -417,10 +426,14 @@ public partial class BitLayoutControl : UserControl
         _sigBits = new List<int>[msg.Signals.Count];
         _labels = new string[msg.Signals.Count];
         _nameTruncated = new bool[msg.Signals.Count];
+        var opt = MuxOption;
         for (int s = 0; s < msg.Signals.Count; s++)
         {
-            _labels[s] = msg.Signals[s].Name;
-            _sigBits[s] = DbcBitLayout.CollectBits(msg.Signals[s]).ToList();
+            var sg = msg.Signals[s];
+            _labels[s] = sg.Name;
+            _sigBits[s] = DbcBitLayout.IsLayoutVisible(sg, opt?.MultiplexorName, opt?.Value)
+                ? DbcBitLayout.CollectBits(sg).ToList()
+                : new List<int>();
         }
         // Later in z-order wins overlapping bits for paint
         foreach (var sg in _zOrder)
@@ -432,7 +445,7 @@ public partial class BitLayoutControl : UserControl
                 if (b >= 0 && b < total) _owner[b] = s;
             }
         }
-        _overlap = DbcBitLayout.FindOverlappingSignals(msg.Signals);
+        _overlap = DbcBitLayout.FindOverlappingSignals(VisibleSignals());
     }
 
     /// <summary>Vector / BUSMASTER bit walk — see <see cref="DbcBitLayout.CollectBits"/>.</summary>
@@ -464,7 +477,7 @@ public partial class BitLayoutControl : UserControl
             if (hostH < 80)
                 hostH = Math.Max(ActualHeight - 40, 240);
 
-            _topHeader = 44;
+            _topHeader = 32;
             int first = FirstVisibleByte();
             int rowCount;
             if (_paged)
@@ -527,10 +540,6 @@ public partial class BitLayoutControl : UserControl
     {
         var typeface = new Typeface(new FontFamily("Tahoma"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-
-        /* Multiplexor caption */
-        DrawText(dc, "Multiplexor Signal:  -- No Multiplexor --",
-            typeface, 11, Color.FromRgb(40, 40, 40), LeftGutter, 8, dpi);
 
         /* Column headers: Normal 7..0; Inverted 0..7 — blocks stay put */
         for (int col = 0; col < 8; col++)
