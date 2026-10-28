@@ -77,27 +77,16 @@ public partial class MainWindow : Window
 
     private void OnGridDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        // Template cells (warning !) still open Message Signal / editors
-        if (Vm.EditSelectedCommand.CanExecute(null))
-            Vm.EditSelectedCommand.Execute(null);
-        e.Handled = true;
-    }
-
-    /// <summary>Overall View: click a message-mapped signal row → Message Signal dialog.</summary>
-    private void OnSignalGridPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not DataGrid grid) return;
-        if (e.ClickCount != 1) return;
-        if (grid.SelectedItem is not SignalRowViewModel row) return;
-        if (row.CatalogAttributes) return; // Signals catalog stays select-only
-        // Only when row visual was hit (not empty area / scrollbar)
+        // Overall View: double-click a row opens Message / Message Signal / editors.
+        // Template cells (warning !) are included. Empty area and the scrollbar are not.
         var src = e.OriginalSource as DependencyObject;
         while (src != null && src is not DataGridRow && src is not DataGrid)
-            src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+            src = VisualTreeHelper.GetParent(src);
         if (src is not DataGridRow) return;
 
         if (Vm.EditSelectedCommand.CanExecute(null))
             Vm.EditSelectedCommand.Execute(null);
+        e.Handled = true;
     }
 
     private void OnDragOver(object sender, DragEventArgs e)

@@ -134,7 +134,6 @@
                     SelectionMode="Single"
                     SelectedItem="{Binding SelectedDetail, Mode=TwoWay}"
                     MouseDoubleClick="OnGridDoubleClick"
-                    PreviewMouseLeftButtonUp="OnSignalGridPreviewMouseLeftButtonUp"
                     AlternatingRowBackground="#FFF7F7F7"
                     GridLinesVisibility="All"
                     Visibility="{Binding DetailMode, Converter={StaticResource EqVis}, ConverterParameter=Signals}">
