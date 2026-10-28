@@ -259,7 +259,7 @@ public static class DbcTokenModelParser
                 Unit = unit,
                 MessageName = msg.Name,
                 MessageId = msg.Id,
-                Multiplexing = mux
+                Multiplexing = FormatMux(mux)
             };
             foreach (var r in receivers) sig.Receivers.Add(r);
             msg.Signals.Add(sig);
@@ -682,11 +682,35 @@ public static class DbcTokenModelParser
             }
             var sig = Db.FindSignal(msgId, sigName);
             if (sig != null && ranges.Count > 0)
-                sig.Multiplexing = string.IsNullOrEmpty(sig.Multiplexing)
-                    ? $"m[{string.Join(",", ranges)}]"
-                    : sig.Multiplexing;
-            _ = muxName;
+            {
+                var rangeText = $"Mux {muxName} [{string.Join(",", ranges)}]";
+                sig.Multiplexing = (sig.Multiplexing ?? "").Contains("Multiplexor", StringComparison.Ordinal)
+                    ? $"{rangeText} / Multiplexor"
+                    : rangeText;
+            }
             OptionalSemi();
+        }
+
+        /// <summary>Same labels as the ANTLR loader, so m32 and m40 stay mutually exclusive.</summary>
+        private static string FormatMux(string? mux)
+        {
+            if (string.IsNullOrWhiteSpace(mux)) return "-";
+            mux = mux.Trim();
+            if (mux.Equals("M", StringComparison.Ordinal)) return "Multiplexor";
+
+            var mNm = System.Text.RegularExpressions.Regex.Match(mux, @"^m(\d+)M$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (mNm.Success)
+                return $"Multiplexed signal {mNm.Groups[1].Value} / Multiplexor";
+
+            var mn = System.Text.RegularExpressions.Regex.Match(mux, @"^m(\d+)$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (mn.Success)
+                return $"Multiplexed signal {mn.Groups[1].Value}";
+
+            if (mux.StartsWith('m') || mux.StartsWith('M'))
+                return $"Multiplexed signal {mux.TrimStart('m', 'M')}";
+            return mux;
         }
 
         private void ParseSgType()
