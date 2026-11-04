@@ -1,0 +1,60 @@
+@namespace DbcEditor.Services.Parsing
+@classname DbcPegasusParser
+@members {
+    private static DbcToken Take(Cursor state, DbcTokKind kind, bool unquote = false)
+    {
+        var at = (int)state["at"];
+        var text = state.Subject.Substring(at, state.Location - at);
+        if (unquote && text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"')
+        {
+            text = text.Substring(1, text.Length - 2).Replace("\"\"", "\"").Replace("\\\"", "\"");
+        }
+        return new DbcToken(kind, text, (int)state["line"], (int)state["col"]);
+    }
+}
+
+start <IList<DbcToken>>
+    = items:token* ws* !. { items }
+
+token <DbcToken>
+    = ws* t:(text / hex / real / digits / ident / colon / semi / comma / pipe / at / plus / minus / lparen / rparen / lbrack / rbrack) { t }
+
+mark
+    = #{ state["line"] = state.Line; state["col"] = state.Column; state["at"] = state.Location; }
+
+text <DbcToken>
+    = mark '"' ( '""' / '\\' . / [^"\\] )* '"' { Take(state, DbcTokKind.String, true) }
+
+hex <DbcToken>
+    = mark "0" [xX] [0-9a-fA-F]+ { Take(state, DbcTokKind.Int) }
+
+real <DbcToken>
+    = mark [0-9]+ "." [0-9]* exponent? { Take(state, DbcTokKind.Float) }
+    / mark "." [0-9]+ exponent? { Take(state, DbcTokKind.Float) }
+    / mark [0-9]+ exponent { Take(state, DbcTokKind.Float) }
+
+exponent
+    = [eE] [+\-]? [0-9]+
+
+digits <DbcToken>
+    = mark [0-9]+ { Take(state, DbcTokKind.Int) }
+
+ident <DbcToken>
+    = mark [A-Za-z_] [A-Za-z0-9_]* { Take(state, DbcTokKind.Ident) }
+
+colon <DbcToken> = mark ":" { Take(state, DbcTokKind.Colon) }
+semi <DbcToken> = mark ";" { Take(state, DbcTokKind.Semi) }
+comma <DbcToken> = mark "," { Take(state, DbcTokKind.Comma) }
+pipe <DbcToken> = mark "|" { Take(state, DbcTokKind.Pipe) }
+at <DbcToken> = mark "@" { Take(state, DbcTokKind.At) }
+plus <DbcToken> = mark "+" { Take(state, DbcTokKind.Plus) }
+minus <DbcToken> = mark "-" { Take(state, DbcTokKind.Minus) }
+lparen <DbcToken> = mark "(" { Take(state, DbcTokKind.LParen) }
+rparen <DbcToken> = mark ")" { Take(state, DbcTokKind.RParen) }
+lbrack <DbcToken> = mark "[" { Take(state, DbcTokKind.LBracket) }
+rbrack <DbcToken> = mark "]" { Take(state, DbcTokKind.RBracket) }
+
+ws <string>
+    = [ \t\r\n\f]+ { "" }
+    / "//" [^\n]* { "" }
+    / "/*" (!"*/" .)* "*/" { "" }
